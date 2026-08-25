@@ -46,7 +46,11 @@ export default function LoginPage() {
       });
 
       if (res?.error) {
-        setLoginError(res.error);
+        if (res.error === "CredentialsSignin") {
+          setLoginError("Invalid email or password. Please check your credentials.");
+        } else {
+          setLoginError(res.error);
+        }
       } else {
         router.push("/dashboard");
         router.refresh();

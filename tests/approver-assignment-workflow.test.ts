@@ -32,7 +32,7 @@ describe("Approver Assignment & Multi-Stage Workflow Tests", () => {
   beforeAll(async () => {
     employeeUser = await prisma.user.findUnique({ where: { email: "employee@company.com" } });
     adminUser1 = await prisma.user.findUnique({ where: { email: "admin@company.com" } });
-    superadminUser = await prisma.user.findUnique({ where: { email: "superadmin@company.com" } });
+    superadminUser = await prisma.user.findFirst({ where: { role: Role.SUPERADMIN } });
 
     // Create a 2nd active admin for testing
     adminUser2 = await prisma.user.upsert({

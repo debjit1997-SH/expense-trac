@@ -32,7 +32,7 @@ describe("Expense Report Versioned PDF Generation Engine", () => {
   beforeAll(async () => {
     employeeUser = await prisma.user.findUnique({ where: { email: "employee@company.com" } });
     adminUser = await prisma.user.findUnique({ where: { email: "admin@company.com" } });
-    superadminUser = await prisma.user.findUnique({ where: { email: "superadmin@company.com" } });
+    superadminUser = await prisma.user.findFirst({ where: { role: Role.SUPERADMIN } });
 
     anotherUser = await prisma.user.upsert({
       where: { email: "another_user@company.com" },

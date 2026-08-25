@@ -30,7 +30,7 @@ describe("Category Expense Analytics & Drill-Down Dashboard Tests", () => {
   beforeAll(async () => {
     employeeUser = await prisma.user.findUnique({ where: { email: "employee@company.com" } });
     adminUser = await prisma.user.findUnique({ where: { email: "admin@company.com" } });
-    superadminUser = await prisma.user.findUnique({ where: { email: "superadmin@company.com" } });
+    superadminUser = await prisma.user.findFirst({ where: { role: Role.SUPERADMIN } });
 
     travelCategory = await prisma.expenseCategory.findFirst({
       where: { code: "TRAVEL" },

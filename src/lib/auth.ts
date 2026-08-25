@@ -16,42 +16,33 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       async authorize(credentials) {
         const validated = LoginSchema.safeParse(credentials);
         if (!validated.success) {
-          throw new Error("Invalid email or password");
+          return null;
         }
 
         const { email, password } = validated.data;
+        const normalizedEmail = email.toLowerCase().trim();
 
-        const user = await prisma.user.findUnique({
-          where: { email },
+        const user = await prisma.user.findFirst({
+          where: {
+            email: {
+              equals: normalizedEmail,
+              mode: "insensitive",
+            },
+          },
         });
 
-        // Constant time check simulation or standard generic error to prevent email enumeration
-        if (!user) {
-          throw new Error("Invalid email or password");
+        if (!user || !user.passwordHash) {
+          return null;
         }
 
         const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
         if (!isPasswordValid) {
-          throw new Error("Invalid email or password");
+          return null;
         }
 
-        // Enforce account status check
-        if (user.status === AccountStatus.PENDING) {
-          throw new Error("Your access request is awaiting approval.");
-        }
-
-        if (user.status === AccountStatus.REJECTED) {
-          throw new Error(
-            "Your access request was rejected. Please contact the administrator."
-          );
-        }
-
-        if (user.status === AccountStatus.DISABLED) {
-          throw new Error("Your account has been disabled.");
-        }
-
+        // Enforce account status check: only ACTIVE users are authorized
         if (user.status !== AccountStatus.ACTIVE) {
-          throw new Error("Account is not active.");
+          return null;
         }
 
         return {

@@ -12,7 +12,7 @@ describe("Bug 5 Test: Rollback Visibility Across USER, ADMIN, and SUPERADMIN", (
   beforeAll(async () => {
     employeeUser = await prisma.user.findUnique({ where: { email: "employee@company.com" } });
     adminUser = await prisma.user.findUnique({ where: { email: "admin@company.com" } });
-    superadminUser = await prisma.user.findUnique({ where: { email: "superadmin@company.com" } });
+    superadminUser = await prisma.user.findFirst({ where: { role: Role.SUPERADMIN } });
   });
 
   afterAll(async () => {

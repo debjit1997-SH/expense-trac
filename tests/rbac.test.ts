@@ -10,8 +10,9 @@ describe("RBAC & Account Status Security Tests", () => {
   });
 
   it("should have seeded Superadmin, Admin, and User with ACTIVE status", async () => {
-    const superadmin = await prisma.user.findUnique({
-      where: { email: "superadmin@company.com" },
+    const superadminEmail = (process.env.SUPERADMIN_EMAIL || "superadmin@company.com").toLowerCase().trim();
+    const superadmin = await prisma.user.findFirst({
+      where: { email: { equals: superadminEmail, mode: "insensitive" } },
     });
     expect(superadmin).not.toBeNull();
     expect(superadmin?.role).toBe(Role.SUPERADMIN);
@@ -30,6 +31,30 @@ describe("RBAC & Account Status Security Tests", () => {
     expect(user).not.toBeNull();
     expect(user?.role).toBe(Role.USER);
     expect(user?.status).toBe(AccountStatus.ACTIVE);
+  });
+
+  it("should authenticate the configured Superadmin through the credentials provider authorize path", async () => {
+    const superadminEmail = (process.env.SUPERADMIN_EMAIL || "superadmin@company.com").toLowerCase().trim();
+    const superadminPassword = process.env.SUPERADMIN_PASSWORD || "SuperPassword123!";
+
+    const user = await prisma.user.findFirst({
+      where: {
+        email: {
+          equals: superadminEmail,
+          mode: "insensitive",
+        },
+      },
+    });
+
+    expect(user).not.toBeNull();
+    expect(user?.status).toBe(AccountStatus.ACTIVE);
+    expect(user?.role).toBe(Role.SUPERADMIN);
+
+    const isMatch = await bcrypt.compare(superadminPassword, user!.passwordHash);
+    expect(isMatch).toBe(true);
+
+    const isWrongMatch = await bcrypt.compare("WrongPass999!", user!.passwordHash);
+    expect(isWrongMatch).toBe(false);
   });
 
   it("should enforce PENDING status for new public applicants without role choice", async () => {
