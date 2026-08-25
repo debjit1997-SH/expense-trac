@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/Card";
 import { Modal } from "@/components/ui/Modal";
 import { requestAccessAction } from "@/actions/auth.actions";
-import { CreditCard, Lock, Mail, Phone, User, CheckCircle2, AlertCircle, ShieldAlert } from "lucide-react";
+import { CreditCard, Lock, Mail, Phone, User, CheckCircle2, AlertCircle } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -190,17 +190,6 @@ export default function LoginPage() {
           </div>
         </CardContent>
       </Card>
-
-      {/* Demo Credentials Helper Box */}
-      <div className="p-3.5 rounded-lg bg-slate-800/40 border border-slate-700/50 text-xs text-slate-400 space-y-1">
-        <p className="font-semibold text-slate-300 flex items-center gap-1.5">
-          <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
-          Default Seed Accounts for Evaluation:
-        </p>
-        <p>&bull; Superadmin: <span className="font-mono text-slate-200">superadmin@company.com</span> / <span className="font-mono text-slate-200">SuperPassword123!</span></p>
-        <p>&bull; Admin: <span className="font-mono text-slate-200">admin@company.com</span> / <span className="font-mono text-slate-200">AdminPassword123!</span></p>
-        <p>&bull; User: <span className="font-mono text-slate-200">employee@company.com</span> / <span className="font-mono text-slate-200">UserPassword123!</span></p>
-      </div>
 
       {/* Request Access Modal */}
       <Modal
