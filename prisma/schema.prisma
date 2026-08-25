@@ -1,0 +1,407 @@
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  USER
+  ADMIN
+  SUPERADMIN
+}
+
+enum AccountStatus {
+  PENDING
+  ACTIVE
+  REJECTED
+  DISABLED
+}
+
+enum ReportStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REIMBURSED
+}
+
+enum WorkflowStage {
+  ADMIN_APPROVAL
+  REIMBURSEMENT
+}
+
+enum AssignmentStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+  REASSIGNED
+}
+
+enum RecipientType {
+  PRIMARY
+  CC
+}
+
+enum DocumentGenStatus {
+  PENDING
+  GENERATED
+  FAILED
+}
+
+enum TaxMode {
+  INTRA_STATE
+  INTER_STATE
+}
+
+enum ItcEligibility {
+  PENDING_REVIEW
+  ELIGIBLE
+  INELIGIBLE
+  NOT_APPLICABLE
+}
+
+enum VendorGstStatus {
+  REGISTERED_REGULAR
+  REGISTERED_COMPOSITION
+  UNREGISTERED
+  OVERSEAS
+}
+
+model User {
+  id              String         @id @default(cuid())
+  name            String
+  email           String         @unique
+  phone           String
+  passwordHash    String
+  role            Role           @default(USER)
+  status          AccountStatus  @default(PENDING)
+  rejectionReason String?
+  
+  // Relations
+  expenseReports      ExpenseReport[]
+  approvedReports     ExpenseReport[] @relation("ApprovedBy")
+  reimbursedReports   ExpenseReport[] @relation("ReimbursedBy")
+  uploadedEvidences   ExpenseEvidence[]
+  auditLogsTriggered  AuditLog[]       @relation("ActorAuditLogs")
+  
+  // Access approval tracking
+  approvedAccessUsers AccessApprovalHistory[] @relation("AdminApprovals")
+  accessHistories     AccessApprovalHistory[] @relation("UserAccessHistory")
+
+  // Approver assignment tracking
+  assignedApprovals          ApprovalAssignment[] @relation("AssignedApprovals")
+  assignmentsCreated         ApprovalAssignment[] @relation("AssignmentsCreated")
+  receivedWorkflowRecipients WorkflowRecipient[]  @relation("WorkflowRecipients")
+  selectedWorkflowRecipients WorkflowRecipient[]  @relation("WorkflowRecipientsSelected")
+
+  // PDF Document Generation
+  generatedDocuments         ExpenseReportDocument[] @relation("GeneratedDocuments")
+
+  // Saved report view preferences
+  viewPreferences            ReportViewPreference[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([email])
+  @@index([status])
+  @@index([role])
+}
+
+model ReportViewPreference {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name         String
+  isDefault    Boolean  @default(false)
+  columnConfig Json     // Array of { id, visible, width, pinned, order }
+  filterConfig Json?    // Saved filter parameters
+  sortConfig   Json?    // Saved sorting parameters
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([userId, name])
+  @@index([userId])
+}
+
+model AccessApprovalHistory {
+  id           String         @id @default(cuid())
+  userId       String
+  user         User           @relation("UserAccessHistory", fields: [userId], references: [id], onDelete: Cascade)
+  actorId      String
+  actor        User           @relation("AdminApprovals", fields: [actorId], references: [id])
+  action       AccountStatus  // ACTIVE, REJECTED, DISABLED
+  assignedRole Role?
+  reason       String?
+  timestamp    DateTime       @default(now())
+
+  @@index([userId])
+  @@index([actorId])
+}
+
+model ExpenseCategory {
+  id            String               @id @default(cuid())
+  code          String               @unique
+  name          String               // Stored and displayed UPPERCASE
+  isActive      Boolean              @default(true)
+  subcategories ExpenseSubcategory[]
+  expenseItems  ExpenseItem[]
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  @@index([isActive])
+}
+
+model ExpenseSubcategory {
+  id           String          @id @default(cuid())
+  categoryId   String
+  category     ExpenseCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  code         String
+  name         String          // Stored and displayed UPPERCASE
+  isActive     Boolean         @default(true)
+  expenseItems ExpenseItem[]
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@unique([categoryId, code])
+  @@index([categoryId, isActive])
+}
+
+model GstTreatment {
+  id           String        @id @default(cuid())
+  code         String        @unique
+  name         String
+  isTaxable    Boolean       @default(true)
+  isActive     Boolean       @default(true)
+  expenseItems ExpenseItem[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+model GstRate {
+  id           String        @id @default(cuid())
+  ratePercent  Decimal       @unique @db.Decimal(5, 2) // 0.00, 5.00, 12.00, 18.00, 28.00
+  label        String        // "18%"
+  isActive     Boolean       @default(true)
+  expenseItems ExpenseItem[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+model ExpenseReport {
+  id                   String        @id @default(cuid())
+  reportNumber         String        @unique // e.g. EXP-2026-000001
+  title                String
+  description          String?
+  status               ReportStatus  @default(DRAFT)
+  totalAmount          Decimal       @default(0.00) @db.Decimal(12, 2)
+  currency             String        @default("INR")
+  
+  // Ownership & review
+  userId               String
+  user                 User          @relation(fields: [userId], references: [id], onDelete: Restrict)
+  
+  submittedAt          DateTime?
+  approvedAt           DateTime?
+  approvedById         String?
+  approvedBy           User?         @relation("ApprovedBy", fields: [approvedById], references: [id])
+  approvalNote         String?
+  
+  reimbursedAt         DateTime?
+  reimbursedById       String?
+  reimbursedBy         User?         @relation("ReimbursedBy", fields: [reimbursedById], references: [id])
+  reimbursementRef     String?
+  reimbursementNote    String?
+  reimbursementDate    DateTime?
+  paymentMethod        String?
+  transactionId        String?
+
+  items                ExpenseItem[]
+  evidences            ExpenseEvidence[]
+  auditLogs            AuditLog[]
+  approvalAssignments  ApprovalAssignment[]
+  workflowRecipients   WorkflowRecipient[]
+  documents            ExpenseReportDocument[]
+
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  @@index([userId, status])
+  @@index([status, submittedAt])
+  @@index([status])
+  @@index([reportNumber])
+  @@index([createdAt])
+  @@index([submittedAt])
+}
+
+model ApprovalAssignment {
+  id                 String           @id @default(cuid())
+  expenseReportId    String
+  expenseReport      ExpenseReport    @relation(fields: [expenseReportId], references: [id], onDelete: Cascade)
+  stage              WorkflowStage
+  assigneeUserId     String
+  assignee           User             @relation("AssignedApprovals", fields: [assigneeUserId], references: [id])
+  assignedByUserId   String
+  assignedBy         User             @relation("AssignmentsCreated", fields: [assignedByUserId], references: [id])
+  status             AssignmentStatus @default(PENDING)
+  assignedAt         DateTime         @default(now())
+  completedAt        DateTime?
+  cancelledAt        DateTime?
+  reassignedFromId   String?
+  reassignmentReason String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  @@index([assigneeUserId, status])
+  @@index([expenseReportId, stage, status])
+  @@index([status])
+  @@index([assignedAt])
+}
+
+model WorkflowRecipient {
+  id               String        @id @default(cuid())
+  expenseReportId  String
+  expenseReport    ExpenseReport @relation(fields: [expenseReportId], references: [id], onDelete: Cascade)
+  workflowStage    WorkflowStage
+  recipientUserId  String
+  recipient        User          @relation("WorkflowRecipients", fields: [recipientUserId], references: [id])
+  recipientType    RecipientType @default(CC)
+  selectedByUserId String
+  selectedBy       User          @relation("WorkflowRecipientsSelected", fields: [selectedByUserId], references: [id])
+  createdAt        DateTime      @default(now())
+
+  @@index([expenseReportId, workflowStage])
+  @@index([recipientUserId])
+}
+
+model ExpenseReportDocument {
+  id                 String            @id @default(cuid())
+  expenseReportId    String
+  expenseReport      ExpenseReport     @relation(fields: [expenseReportId], references: [id], onDelete: Cascade)
+  versionNumber      Int
+  workflowStatus     ReportStatus      // SUBMITTED, APPROVED, REIMBURSED
+  storagePath        String            // path in Supabase bucket or local fallback
+  filename           String
+  mimeType           String            @default("application/pdf")
+  fileSize           Int
+  checksum           String?
+  generationStatus   DocumentGenStatus @default(PENDING)
+  generationError    String?
+  generatedByUserId  String?
+  generatedByUser    User?             @relation("GeneratedDocuments", fields: [generatedByUserId], references: [id])
+  generatedAt        DateTime          @default(now())
+  isCurrent          Boolean           @default(true)
+  supersededAt       DateTime?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  @@index([expenseReportId, workflowStatus])
+  @@index([expenseReportId, isCurrent])
+  @@index([generationStatus])
+  @@index([generatedAt])
+}
+
+model ExpenseItem {
+  id              String              @id @default(cuid())
+  reportId        String
+  report          ExpenseReport       @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  
+  expenseDate     DateTime
+  vendorName      String
+  invoiceNumber   String?
+  invoiceDate     DateTime?
+  description     String
+  
+  categoryId      String
+  category        ExpenseCategory     @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  subcategoryId   String
+  subcategory     ExpenseSubcategory  @relation(fields: [subcategoryId], references: [id], onDelete: Restrict)
+  
+  totalAmount     Decimal             @db.Decimal(12, 2)
+  currency        String              @default("INR")
+  
+  // GST Details
+  gstTreatmentId  String?
+  gstTreatment    GstTreatment?       @relation(fields: [gstTreatmentId], references: [id])
+  gstRateId       String?
+  gstRate         GstRate?            @relation(fields: [gstRateId], references: [id])
+  
+  documentType    String?             // INVOICE, BILL_OF_SUPPLY, RECEIPT, etc.
+  vendorGstStatus VendorGstStatus?
+  vendorGstin     String?
+  companyGstin    String?
+  placeOfSupply   String?
+  hsnSacCode      String?
+  taxableValue    Decimal?            @db.Decimal(12, 2)
+  taxMode         TaxMode?            // INTRA_STATE, INTER_STATE
+  cgstRate        Decimal?            @db.Decimal(5, 2)
+  cgstAmount      Decimal?            @db.Decimal(12, 2)
+  sgstRate        Decimal?            @db.Decimal(5, 2)
+  sgstAmount      Decimal?            @db.Decimal(12, 2)
+  igstRate        Decimal?            @db.Decimal(5, 2)
+  igstAmount      Decimal?            @db.Decimal(12, 2)
+  cessAmount      Decimal?            @db.Decimal(12, 2)
+  totalGstAmount  Decimal?            @db.Decimal(12, 2)
+  reverseCharge   Boolean             @default(false)
+  itcEligibility  ItcEligibility      @default(PENDING_REVIEW)
+  gstRemarks      String?
+
+  evidences       ExpenseEvidence[]
+
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  @@index([reportId])
+  @@index([categoryId])
+  @@index([subcategoryId])
+  @@index([expenseDate])
+  @@index([vendorName])
+}
+
+model ExpenseEvidence {
+  id              String         @id @default(cuid())
+  reportId        String
+  report          ExpenseReport  @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  itemId          String?
+  item            ExpenseItem?   @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  
+  originalName    String
+  mimeType        String
+  fileSize        Int            // in bytes
+  storagePath     String         // path in Supabase bucket or local fallback
+  
+  uploaderId      String
+  uploader        User           @relation(fields: [uploaderId], references: [id])
+  
+  // OCR metadata
+  ocrConfidence   Decimal?       @db.Decimal(5, 2)
+  ocrRawResponse  String?        // JSON string
+  
+  createdAt       DateTime       @default(now())
+
+  @@index([reportId])
+  @@index([itemId])
+}
+
+model AuditLog {
+  id          String         @id @default(cuid())
+  actorId     String
+  actor       User           @relation("ActorAuditLogs", fields: [actorId], references: [id])
+  action      String         // e.g. "EXPENSE_SUBMITTED", "ACCESS_REQUEST_APPROVED"
+  entityType  String         // "User", "ExpenseReport", "ExpenseItem", "Category", "GstMaster"
+  entityId    String
+  reportId    String?
+  report      ExpenseReport? @relation(fields: [reportId], references: [id], onDelete: SetNull)
+  previousVal String?        // JSON string
+  newVal      String?        // JSON string
+  reason      String?
+  timestamp   DateTime       @default(now())
+
+  @@index([actorId])
+  @@index([entityType, entityId])
+  @@index([reportId])
+  @@index([timestamp])
+}
