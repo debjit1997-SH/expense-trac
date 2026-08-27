@@ -8,7 +8,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { DateDisplay } from "@/components/common/DateDisplay";
 import { formatCurrencyINR } from "@/lib/formatters";
-import { Banknote, ArrowRight, CheckCircle2, Wallet, Coins, ArrowDownRight } from "lucide-react";
+import { Banknote, ArrowRight, CheckCircle2, Wallet, Coins } from "lucide-react";
 
 export default async function AdvanceDisbursementsPage() {
   const user = await getCurrentUser();
@@ -16,7 +16,11 @@ export default async function AdvanceDisbursementsPage() {
     redirect("/dashboard");
   }
 
-  const { pendingDisbursement, activeAdvances } = await getSuperadminDisbursementInboxAction();
+  const data = await getSuperadminDisbursementInboxAction();
+  const pendingDisbursement = Array.isArray(data?.pendingDisbursement) ? data.pendingDisbursement : [];
+  const activeAdvances = Array.isArray(data?.activeAdvances) ? data.activeAdvances : [];
+
+  const isCompletelyEmpty = pendingDisbursement.length === 0 && activeAdvances.length === 0;
 
   return (
     <div className="space-y-6">
@@ -31,6 +35,18 @@ export default async function AdvanceDisbursementsPage() {
           </p>
         </div>
       </div>
+
+      {isCompletelyEmpty && (
+        <Card className="shadow-sm border-slate-200">
+          <CardContent className="py-12 px-4 text-center">
+            <CheckCircle2 className="w-12 h-12 text-emerald-400 mx-auto mb-3" />
+            <h3 className="text-sm font-bold text-slate-700">Workspace Clear</h3>
+            <p className="text-xs text-slate-500 mt-1">
+              No advance requests are currently awaiting disbursement or settlement.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Section 1: Approved Advances Awaiting Disbursement */}
       <Card className="shadow-sm border-purple-200">
@@ -69,8 +85,8 @@ export default async function AdvanceDisbursementsPage() {
                         {adv.advanceNumber}
                       </td>
                       <td className="py-3 px-4 text-xs text-slate-700">
-                        <span className="font-semibold">{adv.user.name}</span>
-                        <span className="text-[11px] text-slate-400 block">{adv.user.email}</span>
+                        <span className="font-semibold">{adv.user?.name || "Unknown"}</span>
+                        <span className="text-[11px] text-slate-400 block">{adv.user?.email || "-"}</span>
                       </td>
                       <td className="py-3 px-4 text-xs font-medium text-slate-800">
                         {adv.purpose}
@@ -82,7 +98,7 @@ export default async function AdvanceDisbursementsPage() {
                         {adv.approvedBy?.name || "-"}
                       </td>
                       <td className="py-3 px-4 text-xs text-slate-500">
-                        <DateDisplay date={adv.approvedAt} />
+                        {adv.approvedAt ? <DateDisplay date={adv.approvedAt} /> : "-"}
                       </td>
                       <td className="py-3 px-4 text-center">
                         <Link href={`/advances/${adv.id}`}>
@@ -129,43 +145,39 @@ export default async function AdvanceDisbursementsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 bg-white">
-                  {activeAdvances.map((adv: any) => {
-                    const avail = adv.disbursedAmount - adv.adjustedAmount - adv.returnedAmount - adv.reservedAmount;
-                    const out = adv.disbursedAmount - adv.adjustedAmount - adv.returnedAmount;
-                    return (
-                      <tr key={adv.id} className="hover:bg-slate-50">
-                        <td className="py-3 px-4 font-mono text-xs font-bold text-slate-900">
-                          {adv.advanceNumber}
-                        </td>
-                        <td className="py-3 px-4 text-xs text-slate-700">
-                          <span className="font-semibold">{adv.user.name}</span>
-                          <span className="text-[11px] text-slate-400 block">{adv.user.email}</span>
-                        </td>
-                        <td className="py-3 px-4 font-bold text-purple-700">
-                          {formatCurrencyINR(adv.disbursedAmount)}
-                        </td>
-                        <td className="py-3 px-4 font-semibold text-blue-700">
-                          {formatCurrencyINR(adv.adjustedAmount)}
-                        </td>
-                        <td className="py-3 px-4 font-semibold text-amber-700">
-                          {formatCurrencyINR(adv.returnedAmount)}
-                        </td>
-                        <td className="py-3 px-4 font-extrabold text-emerald-700">
-                          {formatCurrencyINR(avail)}
-                        </td>
-                        <td className="py-3 px-4 font-extrabold text-slate-900">
-                          {formatCurrencyINR(out)}
-                        </td>
-                        <td className="py-3 px-4 text-center">
-                          <Link href={`/advances/${adv.id}`}>
-                            <Button size="sm" variant="outline" className="text-xs h-7 px-2.5">
-                              Manage <ArrowRight className="w-3 h-3 ml-1" />
-                            </Button>
-                          </Link>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {activeAdvances.map((adv: any) => (
+                    <tr key={adv.id} className="hover:bg-slate-50">
+                      <td className="py-3 px-4 font-mono text-xs font-bold text-slate-900">
+                        {adv.advanceNumber}
+                      </td>
+                      <td className="py-3 px-4 text-xs text-slate-700">
+                        <span className="font-semibold">{adv.user?.name || "Unknown"}</span>
+                        <span className="text-[11px] text-slate-400 block">{adv.user?.email || "-"}</span>
+                      </td>
+                      <td className="py-3 px-4 font-bold text-purple-700">
+                        {formatCurrencyINR(adv.disbursedAmount)}
+                      </td>
+                      <td className="py-3 px-4 font-semibold text-blue-700">
+                        {formatCurrencyINR(adv.adjustedAmount)}
+                      </td>
+                      <td className="py-3 px-4 font-semibold text-amber-700">
+                        {formatCurrencyINR(adv.returnedAmount)}
+                      </td>
+                      <td className="py-3 px-4 font-extrabold text-emerald-700">
+                        {formatCurrencyINR(adv.availableBalance)}
+                      </td>
+                      <td className="py-3 px-4 font-extrabold text-slate-900">
+                        {formatCurrencyINR(adv.outstandingBalance)}
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        <Link href={`/advances/${adv.id}`}>
+                          <Button size="sm" variant="outline" className="text-xs h-7 px-2.5">
+                            Manage <ArrowRight className="w-3 h-3 ml-1" />
+                          </Button>
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>

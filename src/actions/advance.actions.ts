@@ -1002,42 +1002,121 @@ export async function getAdvanceApprovalInboxAction(
 /**
  * Get Advances for Superadmin Disbursement & Settlement workspace
  */
-export async function getSuperadminDisbursementInboxAction(
-  tab: "PENDING_DISBURSEMENT" | "ACTIVE_DISBURSED" | "SETTLED" = "PENDING_DISBURSEMENT"
-) {
+export async function getSuperadminDisbursementInboxAction() {
   await requireSuperAdmin();
 
-  let whereClause: Prisma.AdvanceRequestWhereInput = {};
-
-  if (tab === "PENDING_DISBURSEMENT") {
-    whereClause = {
-      status: AdvanceStatus.APPROVED,
-    };
-  } else if (tab === "ACTIVE_DISBURSED") {
-    whereClause = {
-      status: { in: [AdvanceStatus.DISBURSED, AdvanceStatus.PARTIALLY_SETTLED] },
-    };
-  } else if (tab === "SETTLED") {
-    whereClause = {
-      status: AdvanceStatus.SETTLED,
-    };
-  }
-
-  const advances = await prisma.advanceRequest.findMany({
-    where: whereClause,
-    orderBy: { updatedAt: "desc" },
-    include: {
-      user: { select: { id: true, name: true, email: true, role: true } },
-      approvedBy: { select: { id: true, name: true, email: true } },
-      disbursedBy: { select: { id: true, name: true, email: true } },
-      allocations: {
-        include: {
-          expenseReport: { select: { id: true, reportNumber: true, title: true, status: true, totalAmount: true } },
-        },
+  const [pendingRaw, activeRaw, settledRaw] = await Promise.all([
+    prisma.advanceRequest.findMany({
+      where: { status: AdvanceStatus.APPROVED },
+      orderBy: { approvedAt: "desc" },
+      include: {
+        user: { select: { id: true, name: true, email: true, role: true } },
+        approvedBy: { select: { id: true, name: true, email: true } },
       },
-      _count: { select: { allocations: true, transactions: true } },
+    }),
+    prisma.advanceRequest.findMany({
+      where: { status: { in: [AdvanceStatus.DISBURSED, AdvanceStatus.PARTIALLY_SETTLED] } },
+      orderBy: { disbursedAt: "desc" },
+      include: {
+        user: { select: { id: true, name: true, email: true, role: true } },
+        approvedBy: { select: { id: true, name: true, email: true } },
+        disbursedBy: { select: { id: true, name: true, email: true } },
+      },
+    }),
+    prisma.advanceRequest.findMany({
+      where: { status: AdvanceStatus.SETTLED },
+      orderBy: { finalSettledAt: "desc" },
+      take: 20,
+      include: {
+        user: { select: { id: true, name: true, email: true, role: true } },
+      },
+    }),
+  ]);
+
+  const pendingDisbursement = pendingRaw.map((adv) => ({
+    id: adv.id,
+    advanceNumber: adv.advanceNumber,
+    purpose: adv.purpose,
+    requestedAmount: Number(adv.requestedAmount),
+    approvedAmount: Number(adv.approvedAmount ?? adv.requestedAmount),
+    disbursedAmount: Number(adv.disbursedAmount),
+    status: adv.status,
+    requiredByDate: adv.requiredByDate ? adv.requiredByDate.toISOString() : null,
+    submittedAt: adv.submittedAt ? adv.submittedAt.toISOString() : null,
+    approvedAt: adv.approvedAt ? adv.approvedAt.toISOString() : null,
+    approvalNote: adv.approvalNote || null,
+    user: {
+      id: adv.user.id,
+      name: adv.user.name,
+      email: adv.user.email,
+      role: adv.user.role,
     },
+    approvedBy: adv.approvedBy
+      ? { id: adv.approvedBy.id, name: adv.approvedBy.name, email: adv.approvedBy.email }
+      : null,
+  }));
+
+  const activeAdvances = activeRaw.map((adv) => {
+    const balances = calculateAdvanceBalances({
+      currentStatus: adv.status,
+      disbursedAmount: adv.disbursedAmount,
+      adjustedAmount: adv.adjustedAmount,
+      returnedAmount: adv.returnedAmount,
+      reservedAmount: adv.reservedAmount,
+    });
+
+    return {
+      id: adv.id,
+      advanceNumber: adv.advanceNumber,
+      purpose: adv.purpose,
+      requestedAmount: Number(adv.requestedAmount),
+      approvedAmount: Number(adv.approvedAmount ?? adv.requestedAmount),
+      disbursedAmount: Number(adv.disbursedAmount),
+      adjustedAmount: Number(adv.adjustedAmount),
+      returnedAmount: Number(adv.returnedAmount),
+      reservedAmount: Number(adv.reservedAmount),
+      availableBalance: Number(balances.availableBalance),
+      outstandingBalance: Number(balances.outstandingBalance),
+      status: adv.status,
+      requiredByDate: adv.requiredByDate ? adv.requiredByDate.toISOString() : null,
+      expectedSettlementDate: adv.expectedSettlementDate ? adv.expectedSettlementDate.toISOString() : null,
+      disbursedAt: adv.disbursedAt ? adv.disbursedAt.toISOString() : null,
+      paymentMode: adv.paymentMode || null,
+      paymentReference: adv.paymentReference || null,
+      user: {
+        id: adv.user.id,
+        name: adv.user.name,
+        email: adv.user.email,
+        role: adv.user.role,
+      },
+      approvedBy: adv.approvedBy
+        ? { id: adv.approvedBy.id, name: adv.approvedBy.name, email: adv.approvedBy.email }
+        : null,
+      disbursedBy: adv.disbursedBy
+        ? { id: adv.disbursedBy.id, name: adv.disbursedBy.name, email: adv.disbursedBy.email }
+        : null,
+    };
   });
 
-  return JSON.parse(JSON.stringify(advances));
+  const settledAdvances = settledRaw.map((adv) => ({
+    id: adv.id,
+    advanceNumber: adv.advanceNumber,
+    purpose: adv.purpose,
+    disbursedAmount: Number(adv.disbursedAmount),
+    adjustedAmount: Number(adv.adjustedAmount),
+    returnedAmount: Number(adv.returnedAmount),
+    status: adv.status,
+    user: {
+      id: adv.user.id,
+      name: adv.user.name,
+      email: adv.user.email,
+      role: adv.user.role,
+    },
+  }));
+
+  return {
+    pendingDisbursement,
+    activeAdvances,
+    settledAdvances,
+  };
 }
