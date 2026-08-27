@@ -773,9 +773,14 @@ export async function generateExpenseSummaryPdf(data: ExpenseReportPdfData): Pro
   currentPage.drawText("STAGE 3: REIMBURSEMENT", { x: MARGIN_LEFT + 345, y: cursorY - 14, size: 8, font: fontBold, color: rgb(0.08, 0.2, 0.4) });
   if (data.workflow.reimbursedBy) {
     currentPage.drawText(`Disbursed By: ${data.workflow.reimbursedBy}`, { x: MARGIN_LEFT + 345, y: cursorY - 26, size: 7.5, font: fontRegular, color: rgb(0.1, 0.1, 0.1) });
-    currentPage.drawText(`Disbursed At: ${data.workflow.reimbursedAt}`, { x: MARGIN_LEFT + 345, y: cursorY - 38, size: 7.5, font: fontRegular, color: rgb(0.1, 0.1, 0.1) });
-    currentPage.drawText(`Method: ${data.workflow.paymentMethod || "N/A"}`, { x: MARGIN_LEFT + 345, y: cursorY - 50, size: 7.5, font: fontRegular, color: rgb(0.1, 0.1, 0.1) });
-    currentPage.drawText(`Ref: ${data.workflow.reimbursementRef || "N/A"}`, { x: MARGIN_LEFT + 345, y: cursorY - 62, size: 7, font: fontBold, color: rgb(0.1, 0.4, 0.2) });
+    currentPage.drawText(`Settled At: ${data.workflow.reimbursedAt}`, { x: MARGIN_LEFT + 345, y: cursorY - 38, size: 7.5, font: fontRegular, color: rgb(0.1, 0.1, 0.1) });
+    if (data.netPayableAmount === 0 && data.advanceAdjustedAmount > 0) {
+      currentPage.drawText("Settlement: Advance Adjusted", { x: MARGIN_LEFT + 345, y: cursorY - 50, size: 7.5, font: fontRegular, color: rgb(0.1, 0.4, 0.2) });
+      currentPage.drawText("Amount Paid: INR 0.00", { x: MARGIN_LEFT + 345, y: cursorY - 62, size: 7, font: fontBold, color: rgb(0.1, 0.4, 0.2) });
+    } else {
+      currentPage.drawText(`Method: ${data.workflow.paymentMethod || "N/A"}`, { x: MARGIN_LEFT + 345, y: cursorY - 50, size: 7.5, font: fontRegular, color: rgb(0.1, 0.1, 0.1) });
+      currentPage.drawText(`Ref: ${data.workflow.reimbursementRef || "N/A"}`, { x: MARGIN_LEFT + 345, y: cursorY - 62, size: 7, font: fontBold, color: rgb(0.1, 0.4, 0.2) });
+    }
   } else {
     currentPage.drawText("Status: NOT YET COMPLETED", { x: MARGIN_LEFT + 345, y: cursorY - 26, size: 7.5, font: fontBold, color: rgb(0.7, 0.4, 0.05) });
     if (data.workflow.reimbursementOwner) {

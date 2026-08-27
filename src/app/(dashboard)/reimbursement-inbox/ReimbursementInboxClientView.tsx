@@ -237,7 +237,13 @@ export function ReimbursementInboxClientView({
                       <span className="text-slate-400 block font-medium">Settlement Status:</span>
                       {report.status === ReportStatus.REIMBURSED ? (
                         <div>
-                          <strong className="text-emerald-700 font-bold">REIMBURSED</strong>
+                          {Number(report.netPayableAmount) === 0 && (Number(report.advanceAdjustedAmount) > 0 || report.advanceAllocation) ? (
+                            <strong className="text-emerald-700 font-bold">
+                              Fully Adjusted (₹0 Paid)
+                            </strong>
+                          ) : (
+                            <strong className="text-emerald-700 font-bold">REIMBURSED</strong>
+                          )}
                           {report.reimbursementRef && (
                             <span className="block font-mono text-[11px] text-slate-600">
                               Ref: {report.reimbursementRef}
@@ -279,9 +285,18 @@ export function ReimbursementInboxClientView({
                           variant="primary"
                           size="sm"
                           onClick={() => handleOpenReimburse(report)}
-                          className="text-xs font-semibold bg-purple-600 hover:bg-purple-700"
+                          className={`text-xs font-semibold ${
+                            (Number(report.netPayableAmount) === 0 || (Number(report.totalAmount) - (Number(report.advanceAdjustedAmount) || Number(report.advanceAllocation?.allocatedAmount) || 0) <= 0)) &&
+                            (Number(report.advanceAdjustedAmount) > 0 || report.advanceAllocation)
+                              ? "bg-emerald-600 hover:bg-emerald-700"
+                              : "bg-purple-600 hover:bg-purple-700"
+                          }`}
                         >
-                          <Banknote className="w-3.5 h-3.5 mr-1" /> Mark Reimbursed
+                          <Banknote className="w-3.5 h-3.5 mr-1" />
+                          {(Number(report.netPayableAmount) === 0 || (Number(report.totalAmount) - (Number(report.advanceAdjustedAmount) || Number(report.advanceAllocation?.allocatedAmount) || 0) <= 0)) &&
+                          (Number(report.advanceAdjustedAmount) > 0 || report.advanceAllocation)
+                            ? "Complete Settlement (₹0 Payable)"
+                            : "Mark Reimbursed"}
                         </Button>
                       )}
                     </div>
@@ -301,8 +316,12 @@ export function ReimbursementInboxClientView({
           reportId={selectedReport.id}
           reportTitle={selectedReport.title}
           reportAmount={Number(selectedReport.totalAmount)}
-          advanceAdjustedAmount={selectedReport.advanceAdjustedAmount}
+          advanceAdjustedAmount={
+            selectedReport.advanceAdjustedAmount ||
+            (selectedReport.advanceAllocation ? Number(selectedReport.advanceAllocation.allocatedAmount) : 0)
+          }
           netPayableAmount={selectedReport.netPayableAmount}
+          advanceRequestNumber={selectedReport.advanceAllocation?.advanceRequest?.advanceNumber}
           onSuccess={() => {
             setReimburseModalOpen(false);
             router.refresh();

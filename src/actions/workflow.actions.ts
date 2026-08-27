@@ -694,9 +694,9 @@ export async function approveExpenseReportAction(data: {
  */
 export async function reimburseExpenseReportAction(data: {
   reportId: string;
-  reimbursementDate: string;
-  paymentMethod: string;
-  reimbursementRef: string;
+  reimbursementDate?: string;
+  paymentMethod?: string;
+  reimbursementRef?: string;
   transactionId?: string;
   reimbursementNote?: string;
 }) {
@@ -704,14 +704,19 @@ export async function reimburseExpenseReportAction(data: {
     const superAdmin = await requireSuperAdmin();
     const { reportId, reimbursementDate, paymentMethod, reimbursementRef, transactionId, reimbursementNote } = data;
 
-    if (!reimbursementDate || !paymentMethod || !reimbursementRef) {
-      return { success: false, error: "Reimbursement date, payment method, and reference are required." };
+    if (!reportId) {
+      return { success: false, error: "Report ID is required." };
     }
 
     const result = await prisma.$transaction(async (tx) => {
       const report = await tx.expenseReport.findUnique({
         where: { id: reportId },
         include: {
+          advanceAllocation: {
+            include: {
+              advanceRequest: { select: { id: true, advanceNumber: true, status: true } },
+            },
+          },
           approvalAssignments: {
             where: { stage: WorkflowStage.REIMBURSEMENT, status: AssignmentStatus.PENDING },
           },
@@ -722,6 +727,10 @@ export async function reimburseExpenseReportAction(data: {
         throw new Error("Expense report not found.");
       }
 
+      if (report.status !== ReportStatus.APPROVED) {
+        throw new Error(`Cannot reimburse report in status ${report.status}. Report must be in APPROVED status.`);
+      }
+
       const check = canReimburseExpenseReport({
         currentUserRole: superAdmin.role,
         reportStatus: report.status,
@@ -729,6 +738,46 @@ export async function reimburseExpenseReportAction(data: {
 
       if (!check.allowed) {
         throw new Error(check.reason);
+      }
+
+      // Authoritative financial calculation on server
+      const grossAmount = Number(report.totalAmount) || 0;
+      const finalAdvanceAdjustment =
+        Number(report.advanceAdjustedAmount) ||
+        (report.advanceAllocation ? Number(report.advanceAllocation.allocatedAmount) : 0);
+      const netPayable = Math.max(0, grossAmount - finalAdvanceAdjustment);
+      const isZeroPayable = netPayable === 0;
+
+      let effectiveDate: Date;
+      let effectivePaymentMethod: string | null = null;
+      let effectiveRef: string | null = null;
+      let effectiveTxnId: string | null = null;
+      let effectiveNote: string | null = reimbursementNote?.trim() || null;
+
+      if (!isZeroPayable) {
+        if (!reimbursementDate) {
+          throw new Error("Payment / disbursement date is required for payable reimbursement.");
+        }
+        if (!paymentMethod || !paymentMethod.trim()) {
+          throw new Error("Payment method is required for payable reimbursement.");
+        }
+        if (!reimbursementRef || !reimbursementRef.trim()) {
+          throw new Error("Bank reference / UTR number is required for payable reimbursement.");
+        }
+
+        effectiveDate = new Date(reimbursementDate);
+        effectivePaymentMethod = paymentMethod.trim();
+        effectiveRef = reimbursementRef.trim();
+        effectiveTxnId = transactionId?.trim() || null;
+      } else {
+        // Dedicated Zero-Net Settlement: no employee payment is made
+        effectiveDate = reimbursementDate ? new Date(reimbursementDate) : new Date();
+        effectivePaymentMethod = "ADVANCE_ADJUSTMENT";
+        effectiveRef = report.advanceAllocation?.advanceRequest?.advanceNumber || "ADVANCE_ADJUSTED";
+        effectiveTxnId = null;
+        if (!effectiveNote) {
+          effectiveNote = `Fully settled against employee company advance (${effectiveRef})`;
+        }
       }
 
       // Mark pending Reimbursement assignment COMPLETED
@@ -743,22 +792,19 @@ export async function reimburseExpenseReportAction(data: {
         });
       }
 
-      const isZeroPayable = report.netPayableAmount.equals(new Prisma.Decimal(0));
-      const effectivePaymentMethod = paymentMethod?.trim() || (isZeroPayable ? "ADVANCE_ADJUSTED" : "BANK_TRANSFER");
-      const effectiveRef = reimbursementRef?.trim() || (isZeroPayable ? "ADV-SETTLED" : "REF-NONE");
-      const effectiveNote = reimbursementNote?.trim() || (isZeroPayable ? `Fully settled against employee advance (₹${report.advanceAdjustedAmount.toFixed(2)})` : null);
-
       const updated = await tx.expenseReport.update({
         where: { id: reportId },
         data: {
           status: ReportStatus.REIMBURSED,
           reimbursedById: superAdmin.id,
           reimbursedAt: new Date(),
-          reimbursementDate: new Date(reimbursementDate),
+          reimbursementDate: effectiveDate,
           paymentMethod: effectivePaymentMethod,
           reimbursementRef: effectiveRef,
-          transactionId: transactionId?.trim() || null,
+          transactionId: effectiveTxnId,
           reimbursementNote: effectiveNote,
+          advanceAdjustedAmount: finalAdvanceAdjustment,
+          netPayableAmount: netPayable,
         },
       });
 
@@ -772,15 +818,16 @@ export async function reimburseExpenseReportAction(data: {
         newVal: {
           status: ReportStatus.REIMBURSED,
           reimbursedBy: superAdmin.email,
-          reimbursementDate,
+          reimbursementDate: effectiveDate.toISOString(),
           paymentMethod: effectivePaymentMethod,
           reimbursementRef: effectiveRef,
-          transactionId,
+          transactionId: effectiveTxnId,
           reimbursementNote: effectiveNote,
-          advanceAdjusted: report.advanceAdjustedAmount.toString(),
-          netPayable: report.netPayableAmount.toString(),
+          advanceAdjusted: finalAdvanceAdjustment.toString(),
+          netPayable: netPayable.toString(),
+          isZeroNetSettlement: isZeroPayable,
         },
-        reason: effectiveNote || "Expense report marked as reimbursed by superadmin",
+        reason: effectiveNote || (isZeroPayable ? "Zero-net advance settlement finalized" : "Expense reimbursement processed"),
         tx,
       });
 

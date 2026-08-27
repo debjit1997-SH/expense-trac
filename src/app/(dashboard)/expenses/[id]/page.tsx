@@ -99,6 +99,15 @@ export default async function ReportDetailPage({ params }: ReportDetailPageProps
     }
   }
 
+  const advanceAdjustedAmount =
+    Number(report.advanceAdjustedAmount) ||
+    (report.advanceAllocation ? Number(report.advanceAllocation.allocatedAmount) : 0);
+  const netPayableAmount =
+    report.netPayableAmount !== undefined && report.netPayableAmount !== null
+      ? Number(report.netPayableAmount)
+      : Math.max(0, Number(report.totalAmount) - advanceAdjustedAmount);
+  const isZeroNetSettlement = netPayableAmount === 0 && advanceAdjustedAmount > 0;
+
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
       {/* Back link */}
@@ -168,13 +177,13 @@ export default async function ReportDetailPage({ params }: ReportDetailPageProps
                 {formatCurrencyINR(report.totalAmount)}
               </span>
 
-              {(Number(report.advanceAdjustedAmount) > 0 || report.advanceAllocation) && (
+              {(advanceAdjustedAmount > 0 || report.advanceAllocation) && (
                 <div className="w-full mt-2 pt-2 border-t border-slate-200 text-right space-y-0.5">
                   <div className="text-xs text-amber-700 font-medium">
-                    Less Advance: -{formatCurrencyINR(Number(report.advanceAdjustedAmount) || Number(report.advanceAllocation?.allocatedAmount) || 0)}
+                    Less Advance: -{formatCurrencyINR(advanceAdjustedAmount)}
                   </div>
                   <div className="text-xs font-extrabold text-emerald-700">
-                    Net Reimbursement: {formatCurrencyINR(Number(report.netPayableAmount) !== undefined ? Number(report.netPayableAmount) : Math.max(0, Number(report.totalAmount) - (Number(report.advanceAdjustedAmount) || 0)))}
+                    Net Reimbursement: {formatCurrencyINR(netPayableAmount)}
                   </div>
                 </div>
               )}
@@ -285,31 +294,53 @@ export default async function ReportDetailPage({ params }: ReportDetailPageProps
           )}
 
           {report.reimbursedAt && (
-            <Card className="border-purple-200 bg-purple-50/30">
+            <Card className={isZeroNetSettlement ? "border-emerald-200 bg-emerald-50/30" : "border-purple-200 bg-purple-50/30"}>
               <CardContent className="p-4 flex items-start gap-3">
-                <Banknote className="w-5 h-5 text-purple-600 shrink-0 mt-0.5" />
+                {isZeroNetSettlement ? (
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                ) : (
+                  <Banknote className="w-5 h-5 text-purple-600 shrink-0 mt-0.5" />
+                )}
                 <div className="text-xs space-y-0.5">
-                  <p className="font-bold text-purple-900 uppercase">Reimbursement Disbursed</p>
+                  <p className={`font-bold uppercase ${isZeroNetSettlement ? "text-emerald-900" : "text-purple-900"}`}>
+                    {isZeroNetSettlement ? "Advance Settlement Completed" : "Reimbursement Disbursed"}
+                  </p>
                   <p className="text-slate-600">
                     Processed by: <span className="font-semibold text-slate-800">{report.reimbursedBy?.name || "Superadmin"}</span>
                   </p>
                   <p className="text-slate-500">
-                    Disbursed On: <DateDisplay date={report.reimbursedAt} />
+                    Settled On: <DateDisplay date={report.reimbursedAt} />
                   </p>
-                  {report.paymentMethod && (
-                    <p className="text-slate-700 font-semibold mt-1">
-                      Method: <span className="font-mono">{report.paymentMethod}</span>
-                    </p>
-                  )}
-                  {report.reimbursementRef && (
-                    <p className="font-mono text-purple-800 font-semibold">
-                      Ref / UTR: {report.reimbursementRef}
-                    </p>
-                  )}
-                  {report.transactionId && (
-                    <p className="font-mono text-slate-600 text-[11px]">
-                      Txn ID: {report.transactionId}
-                    </p>
+                  {isZeroNetSettlement ? (
+                    <>
+                      <p className="text-emerald-800 font-bold mt-1">
+                        Settlement: Fully adjusted against advance
+                      </p>
+                      <p className="text-slate-700 font-semibold">
+                        Amount paid to employee: <span className="font-mono font-bold text-slate-900">₹0.00</span>
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-purple-900 font-bold mt-1">
+                        Amount paid to employee: <span className="font-mono">{formatCurrencyINR(netPayableAmount)}</span>
+                      </p>
+                      {report.paymentMethod && (
+                        <p className="text-slate-700 font-semibold">
+                          Method: <span className="font-mono">{report.paymentMethod}</span>
+                        </p>
+                      )}
+                      {report.reimbursementRef && (
+                        <p className="font-mono text-purple-800 font-semibold">
+                          Ref / UTR: {report.reimbursementRef}
+                        </p>
+                      )}
+                      {report.transactionId && (
+                        <p className="font-mono text-slate-600 text-[11px]">
+                          Txn ID: {report.transactionId}
+                        </p>
+                      )}
+                    </>
                   )}
                   {report.reimbursementNote && (
                     <p className="italic text-slate-600 mt-1">
@@ -339,6 +370,9 @@ export default async function ReportDetailPage({ params }: ReportDetailPageProps
         primaryReimbursementOwnerId={activeReimbursementAssignment?.assigneeUserId}
         primaryReimbursementOwnerName={activeReimbursementAssignment?.assignee?.name}
         eligibleReassignUsers={eligibleReassignUsers}
+        advanceAdjustedAmount={advanceAdjustedAmount}
+        netPayableAmount={netPayableAmount}
+        advanceRequestNumber={report.advanceAllocation?.advanceRequest?.advanceNumber}
       />
 
       {/* Versioned PDF Controls & Document History */}

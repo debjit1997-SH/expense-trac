@@ -28,6 +28,9 @@ interface ReportActionControlsProps {
   primaryReimbursementOwnerId?: string | null;
   primaryReimbursementOwnerName?: string | null;
   eligibleReassignUsers?: Array<{ id: string; name: string; email: string; role: Role }>;
+  advanceAdjustedAmount?: number;
+  netPayableAmount?: number;
+  advanceRequestNumber?: string | null;
 }
 
 export function ReportActionControls({
@@ -45,6 +48,9 @@ export function ReportActionControls({
   primaryReimbursementOwnerId,
   primaryReimbursementOwnerName,
   eligibleReassignUsers = [],
+  advanceAdjustedAmount = 0,
+  netPayableAmount,
+  advanceRequestNumber,
 }: ReportActionControlsProps) {
   const router = useRouter();
 
@@ -219,9 +225,16 @@ export function ReportActionControls({
             variant="primary"
             size="sm"
             onClick={() => setShowReimburseModal(true)}
-            className="text-xs font-semibold bg-purple-600 hover:bg-purple-700"
+            className={`text-xs font-semibold ${
+              (netPayableAmount !== undefined ? netPayableAmount === 0 : totalAmount - advanceAdjustedAmount <= 0) && advanceAdjustedAmount > 0
+                ? "bg-emerald-600 hover:bg-emerald-700"
+                : "bg-purple-600 hover:bg-purple-700"
+            }`}
           >
-            <Banknote className="w-3.5 h-3.5 mr-1" /> Disburse &amp; Mark Reimbursed
+            <Banknote className="w-3.5 h-3.5 mr-1" />
+            {(netPayableAmount !== undefined ? netPayableAmount === 0 : totalAmount - advanceAdjustedAmount <= 0) && advanceAdjustedAmount > 0
+              ? "Complete Settlement (₹0 Payable)"
+              : "Disburse & Mark Reimbursed"}
           </Button>
         )}
       </div>
@@ -257,6 +270,9 @@ export function ReportActionControls({
         reportId={reportId}
         reportTitle={reportTitle}
         reportAmount={totalAmount}
+        advanceAdjustedAmount={advanceAdjustedAmount}
+        netPayableAmount={netPayableAmount}
+        advanceRequestNumber={advanceRequestNumber}
         onSuccess={() => {
           setShowReimburseModal(false);
           router.refresh();
