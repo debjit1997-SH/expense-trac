@@ -7,6 +7,8 @@ export const CreateExpenseTagSchema = z.object({
     .max(120, "Title is too long")
     .trim(),
   description: z.string().max(500, "Description is too long").optional().nullable(),
+  advanceRequestId: z.string().optional().nullable(),
+  advanceAdjustmentAmount: z.number().nonnegative().optional().nullable(),
 });
 
 export const UpdateExpenseTagSchema = CreateExpenseTagSchema.extend({

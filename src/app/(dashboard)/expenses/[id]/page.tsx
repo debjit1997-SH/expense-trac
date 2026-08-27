@@ -144,15 +144,41 @@ export default async function ReportDetailPage({ params }: ReportDetailPageProps
                   </span>
                 )}
               </div>
+
+              {report.advanceAllocation?.advanceRequest && (
+                <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-2">
+                  <span className="text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded">
+                    Linked Company Advance:
+                    <Link
+                      href={`/advances/${report.advanceAllocation.advanceRequest.id}`}
+                      className="ml-1.5 font-bold font-mono underline hover:text-emerald-950"
+                    >
+                      {report.advanceAllocation.advanceRequest.advanceNumber}
+                    </Link>
+                  </span>
+                </div>
+              )}
             </div>
 
-            <div className="flex flex-col md:items-end p-4 rounded-lg bg-slate-50 border border-slate-200 shrink-0">
+            <div className="flex flex-col md:items-end p-4 rounded-lg bg-slate-50 border border-slate-200 shrink-0 min-w-[220px]">
               <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                Total Reimbursement
+                Total Expense Amount
               </span>
-              <span className="text-3xl font-black text-blue-700 mt-0.5">
+              <span className="text-2xl font-black text-blue-700 mt-0.5">
                 {formatCurrencyINR(report.totalAmount)}
               </span>
+
+              {(Number(report.advanceAdjustedAmount) > 0 || report.advanceAllocation) && (
+                <div className="w-full mt-2 pt-2 border-t border-slate-200 text-right space-y-0.5">
+                  <div className="text-xs text-amber-700 font-medium">
+                    Less Advance: -{formatCurrencyINR(Number(report.advanceAdjustedAmount) || Number(report.advanceAllocation?.allocatedAmount) || 0)}
+                  </div>
+                  <div className="text-xs font-extrabold text-emerald-700">
+                    Net Reimbursement: {formatCurrencyINR(Number(report.netPayableAmount) !== undefined ? Number(report.netPayableAmount) : Math.max(0, Number(report.totalAmount) - (Number(report.advanceAdjustedAmount) || 0)))}
+                  </div>
+                </div>
+              )}
+
               <span className="text-xs text-slate-500 mt-1">
                 {report.items.length} {report.items.length === 1 ? "Item" : "Items"}
               </span>

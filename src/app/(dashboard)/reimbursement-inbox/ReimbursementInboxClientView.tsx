@@ -191,11 +191,16 @@ export function ReimbursementInboxClientView({
 
                     <div className="text-right">
                       <span className="text-xs font-semibold text-slate-500 uppercase">
-                        Total Amount
+                        {Number(report.advanceAdjustedAmount) > 0 ? "Net Reimbursement" : "Total Amount"}
                       </span>
                       <p className="text-xl font-black text-slate-950 font-mono">
-                        {formatCurrencyINR(report.totalAmount)}
+                        {formatCurrencyINR(report.netPayableAmount !== undefined && report.netPayableAmount !== null ? report.netPayableAmount : Math.max(0, Number(report.totalAmount) - (Number(report.advanceAdjustedAmount) || 0)))}
                       </p>
+                      {Number(report.advanceAdjustedAmount) > 0 && (
+                        <p className="text-[11px] text-amber-700 font-semibold">
+                          Advance Adjusted: -{formatCurrencyINR(report.advanceAdjustedAmount)}
+                        </p>
+                      )}
                       {totalGst > 0 && (
                         <p className="text-[11px] text-purple-700 font-semibold">
                           GST Included: {formatCurrencyINR(totalGst)}
@@ -296,6 +301,8 @@ export function ReimbursementInboxClientView({
           reportId={selectedReport.id}
           reportTitle={selectedReport.title}
           reportAmount={Number(selectedReport.totalAmount)}
+          advanceAdjustedAmount={selectedReport.advanceAdjustedAmount}
+          netPayableAmount={selectedReport.netPayableAmount}
           onSuccess={() => {
             setReimburseModalOpen(false);
             router.refresh();

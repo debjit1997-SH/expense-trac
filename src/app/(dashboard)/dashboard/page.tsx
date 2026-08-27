@@ -20,6 +20,9 @@ import {
   ArrowRight,
   TrendingUp,
   Clock,
+  Wallet,
+  HandCoins,
+  FileCheck,
 } from "lucide-react";
 
 export default async function DashboardPage() {
@@ -41,13 +44,20 @@ export default async function DashboardPage() {
   let allApprovedReportsCount = 0;
   let allReimbursedReportsCount = 0;
 
+  let userActiveAdvancesCount = 0;
+  let pendingAdvanceApprovalsCount = 0;
+  let pendingAdvanceDisbursementsCount = 0;
+
   if (isUser) {
-    [userDraftsCount, userSubmittedCount, userApprovedCount, userReimbursedCount] =
+    [userDraftsCount, userSubmittedCount, userApprovedCount, userReimbursedCount, userActiveAdvancesCount] =
       await Promise.all([
         prisma.expenseReport.count({ where: { userId: user.id, status: ReportStatus.DRAFT } }),
         prisma.expenseReport.count({ where: { userId: user.id, status: ReportStatus.SUBMITTED } }),
         prisma.expenseReport.count({ where: { userId: user.id, status: ReportStatus.APPROVED } }),
         prisma.expenseReport.count({ where: { userId: user.id, status: ReportStatus.REIMBURSED } }),
+        prisma.advanceRequest.count({
+          where: { userId: user.id, status: { in: ["DISBURSED", "PARTIALLY_SETTLED"] } },
+        }),
       ]);
   } else if (isAdmin) {
     [
@@ -55,12 +65,15 @@ export default async function DashboardPage() {
       submittedReportsToReviewCount,
       allApprovedReportsCount,
       userDraftsCount,
+      pendingAdvanceApprovalsCount,
     ] = await Promise.all([
       prisma.user.count({ where: { status: AccountStatus.PENDING } }),
-      // Admin sees submitted reports to review (excluding their own for review counts or total submitted)
       prisma.expenseReport.count({ where: { status: ReportStatus.SUBMITTED } }),
       prisma.expenseReport.count({ where: { status: ReportStatus.APPROVED } }),
       prisma.expenseReport.count({ where: { userId: user.id, status: ReportStatus.DRAFT } }),
+      prisma.advanceApprovalAssignment.count({
+        where: { assigneeUserId: user.id, status: "PENDING" },
+      }),
     ]);
   } else if (isSuperAdmin) {
     [
@@ -68,11 +81,15 @@ export default async function DashboardPage() {
       submittedReportsToReviewCount,
       allApprovedReportsCount,
       allReimbursedReportsCount,
+      pendingAdvanceApprovalsCount,
+      pendingAdvanceDisbursementsCount,
     ] = await Promise.all([
       prisma.user.count({ where: { status: AccountStatus.PENDING } }),
       prisma.expenseReport.count({ where: { status: ReportStatus.SUBMITTED } }),
       prisma.expenseReport.count({ where: { status: ReportStatus.APPROVED } }),
       prisma.expenseReport.count({ where: { status: ReportStatus.REIMBURSED } }),
+      prisma.advanceApprovalAssignment.count({ where: { status: "PENDING" } }),
+      prisma.advanceRequest.count({ where: { status: "APPROVED" } }),
     ]);
   }
 
@@ -108,7 +125,13 @@ export default async function DashboardPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          <Link href="/advances/create">
+            <Button variant="primary" className="bg-emerald-600 hover:bg-emerald-500 text-xs font-semibold">
+              <HandCoins className="w-4 h-4 mr-1.5" />
+              Request Advance
+            </Button>
+          </Link>
           <Link href="/expenses/create">
             <Button variant="primary" className="bg-blue-600 hover:bg-blue-500 text-xs font-semibold">
               <PlusCircle className="w-4 h-4 mr-1.5" />
@@ -207,22 +230,41 @@ export default async function DashboardPage() {
                 </CardContent>
               </Card>
             </Link>
+
+            <Link href="/advances" className="block group">
+              <Card className="hover:border-emerald-300 hover:shadow-md transition-all">
+                <CardContent className="p-5 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                      MY ADVANCES
+                    </p>
+                    <p className="text-2xl font-extrabold text-emerald-700 mt-1">{userActiveAdvancesCount}</p>
+                    <span className="text-[11px] text-emerald-600 font-medium group-hover:underline inline-flex items-center gap-0.5 mt-1">
+                      Active Advances <ArrowRight className="w-3 h-3" />
+                    </span>
+                  </div>
+                  <div className="p-3 bg-emerald-50 rounded-xl text-emerald-600">
+                    <Wallet className="w-6 h-6" />
+                  </div>
+                </CardContent>
+              </Card>
+            </Link>
           </div>
         )}
 
         {/* ADMIN CARDS */}
         {isAdmin && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             <Link href="/user-management?tab=requests" className="block group">
               <Card className="hover:border-blue-300 hover:shadow-md transition-all">
                 <CardContent className="p-5 flex items-center justify-between">
                   <div>
                     <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                      PENDING ACCESS REQUESTS
+                      ACCESS REQUESTS
                     </p>
                     <p className="text-2xl font-extrabold text-amber-600 mt-1">{pendingAccessRequestsCount}</p>
                     <span className="text-[11px] text-amber-600 font-medium group-hover:underline inline-flex items-center gap-0.5 mt-1">
-                      Review Requests <ArrowRight className="w-3 h-3" />
+                      Review <ArrowRight className="w-3 h-3" />
                     </span>
                   </div>
                   <div className="p-3 bg-amber-50 rounded-xl text-amber-600">
@@ -237,15 +279,34 @@ export default async function DashboardPage() {
                 <CardContent className="p-5 flex items-center justify-between">
                   <div>
                     <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                      SUBMITTED TO REVIEW
+                      EXPENSE TO REVIEW
                     </p>
                     <p className="text-2xl font-extrabold text-blue-700 mt-1">{submittedReportsToReviewCount}</p>
                     <span className="text-[11px] text-blue-600 font-medium group-hover:underline inline-flex items-center gap-0.5 mt-1">
-                      Approve Reports <ArrowRight className="w-3 h-3" />
+                      Approve <ArrowRight className="w-3 h-3" />
                     </span>
                   </div>
                   <div className="p-3 bg-blue-50 rounded-xl text-blue-600">
                     <Send className="w-6 h-6" />
+                  </div>
+                </CardContent>
+              </Card>
+            </Link>
+
+            <Link href="/advances/approvals" className="block group">
+              <Card className="hover:border-amber-300 hover:shadow-md transition-all">
+                <CardContent className="p-5 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                      ADVANCE APPROVALS
+                    </p>
+                    <p className="text-2xl font-extrabold text-amber-600 mt-1">{pendingAdvanceApprovalsCount}</p>
+                    <span className="text-[11px] text-amber-600 font-medium group-hover:underline inline-flex items-center gap-0.5 mt-1">
+                      Review <ArrowRight className="w-3 h-3" />
+                    </span>
+                  </div>
+                  <div className="p-3 bg-amber-50 rounded-xl text-amber-600">
+                    <FileCheck className="w-6 h-6" />
                   </div>
                 </CardContent>
               </Card>
@@ -260,7 +321,7 @@ export default async function DashboardPage() {
                     </p>
                     <p className="text-2xl font-extrabold text-emerald-700 mt-1">{allApprovedReportsCount}</p>
                     <span className="text-[11px] text-emerald-600 font-medium group-hover:underline inline-flex items-center gap-0.5 mt-1">
-                      View Status <ArrowRight className="w-3 h-3" />
+                      Status <ArrowRight className="w-3 h-3" />
                     </span>
                   </div>
                   <div className="p-3 bg-emerald-50 rounded-xl text-emerald-600">
@@ -279,7 +340,7 @@ export default async function DashboardPage() {
                     </p>
                     <p className="text-2xl font-extrabold text-slate-900 mt-1">{userDraftsCount}</p>
                     <span className="text-[11px] text-blue-600 font-medium group-hover:underline inline-flex items-center gap-0.5 mt-1">
-                      My Personal Drafts <ArrowRight className="w-3 h-3" />
+                      Drafts <ArrowRight className="w-3 h-3" />
                     </span>
                   </div>
                   <div className="p-3 bg-slate-100 rounded-xl text-slate-700">
@@ -293,21 +354,59 @@ export default async function DashboardPage() {
 
         {/* SUPERADMIN CARDS */}
         {isSuperAdmin && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             <Link href="/user-management?tab=requests" className="block group">
               <Card className="hover:border-blue-300 hover:shadow-md transition-all">
                 <CardContent className="p-5 flex items-center justify-between">
                   <div>
                     <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                      PENDING ACCESS REQUESTS
+                      ACCESS REQUESTS
                     </p>
                     <p className="text-2xl font-extrabold text-amber-600 mt-1">{pendingAccessRequestsCount}</p>
                     <span className="text-[11px] text-amber-600 font-medium group-hover:underline inline-flex items-center gap-0.5 mt-1">
-                      Manage Requests <ArrowRight className="w-3 h-3" />
+                      Manage <ArrowRight className="w-3 h-3" />
                     </span>
                   </div>
                   <div className="p-3 bg-amber-50 rounded-xl text-amber-600">
                     <Users className="w-6 h-6" />
+                  </div>
+                </CardContent>
+              </Card>
+            </Link>
+
+            <Link href="/reimbursement-inbox" className="block group">
+              <Card className="hover:border-blue-300 hover:shadow-md transition-all">
+                <CardContent className="p-5 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                      REIMBURSEMENT PAYOUTS
+                    </p>
+                    <p className="text-2xl font-extrabold text-emerald-700 mt-1">{allApprovedReportsCount}</p>
+                    <span className="text-[11px] text-emerald-600 font-medium group-hover:underline inline-flex items-center gap-0.5 mt-1">
+                      Payout Inbox <ArrowRight className="w-3 h-3" />
+                    </span>
+                  </div>
+                  <div className="p-3 bg-emerald-50 rounded-xl text-emerald-600">
+                    <Banknote className="w-6 h-6" />
+                  </div>
+                </CardContent>
+              </Card>
+            </Link>
+
+            <Link href="/advances/disbursements" className="block group">
+              <Card className="hover:border-purple-300 hover:shadow-md transition-all">
+                <CardContent className="p-5 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                      ADVANCE DISBURSEMENTS
+                    </p>
+                    <p className="text-2xl font-extrabold text-purple-700 mt-1">{pendingAdvanceDisbursementsCount}</p>
+                    <span className="text-[11px] text-purple-600 font-medium group-hover:underline inline-flex items-center gap-0.5 mt-1">
+                      Disburse Funds <ArrowRight className="w-3 h-3" />
+                    </span>
+                  </div>
+                  <div className="p-3 bg-purple-50 rounded-xl text-purple-600">
+                    <Wallet className="w-6 h-6" />
                   </div>
                 </CardContent>
               </Card>
@@ -322,30 +421,11 @@ export default async function DashboardPage() {
                     </p>
                     <p className="text-2xl font-extrabold text-blue-700 mt-1">{submittedReportsToReviewCount}</p>
                     <span className="text-[11px] text-blue-600 font-medium group-hover:underline inline-flex items-center gap-0.5 mt-1">
-                      Review &amp; Approve <ArrowRight className="w-3 h-3" />
+                      Review <ArrowRight className="w-3 h-3" />
                     </span>
                   </div>
                   <div className="p-3 bg-blue-50 rounded-xl text-blue-600">
                     <Send className="w-6 h-6" />
-                  </div>
-                </CardContent>
-              </Card>
-            </Link>
-
-            <Link href="/expenses?status=APPROVED" className="block group">
-              <Card className="hover:border-blue-300 hover:shadow-md transition-all">
-                <CardContent className="p-5 flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                      APPROVED (WAITING PAYOUT)
-                    </p>
-                    <p className="text-2xl font-extrabold text-emerald-700 mt-1">{allApprovedReportsCount}</p>
-                    <span className="text-[11px] text-emerald-600 font-medium group-hover:underline inline-flex items-center gap-0.5 mt-1">
-                      Mark as Reimbursed <ArrowRight className="w-3 h-3" />
-                    </span>
-                  </div>
-                  <div className="p-3 bg-emerald-50 rounded-xl text-emerald-600">
-                    <CheckCircle2 className="w-6 h-6" />
                   </div>
                 </CardContent>
               </Card>
@@ -358,13 +438,13 @@ export default async function DashboardPage() {
                     <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
                       REIMBURSED REPORTS
                     </p>
-                    <p className="text-2xl font-extrabold text-purple-700 mt-1">{allReimbursedReportsCount}</p>
+                    <p className="text-2xl font-extrabold text-slate-900 mt-1">{allReimbursedReportsCount}</p>
                     <span className="text-[11px] text-purple-600 font-medium group-hover:underline inline-flex items-center gap-0.5 mt-1">
-                      Completed Records <ArrowRight className="w-3 h-3" />
+                      History <ArrowRight className="w-3 h-3" />
                     </span>
                   </div>
-                  <div className="p-3 bg-purple-50 rounded-xl text-purple-600">
-                    <Banknote className="w-6 h-6" />
+                  <div className="p-3 bg-slate-100 rounded-xl text-slate-700">
+                    <CheckCircle2 className="w-6 h-6" />
                   </div>
                 </CardContent>
               </Card>

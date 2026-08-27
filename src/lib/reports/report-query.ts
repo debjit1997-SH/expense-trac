@@ -8,6 +8,7 @@ import {
   WorkflowStage,
   AssignmentStatus,
   RecipientType,
+  AdvanceStatus,
   Prisma,
 } from "@prisma/client";
 import { formatInTimeZone, toDate } from "date-fns-tz";
@@ -42,6 +43,9 @@ export interface DetailedReportFilterParams {
   reverseCharge?: boolean;
   hasEvidence?: boolean;
   globalSearch?: string;
+  advanceLinked?: boolean;
+  advanceRequestNumber?: string;
+  advanceStatus?: AdvanceStatus;
   page?: number;
   pageSize?: number;
   sortBy?: string;
@@ -58,6 +62,12 @@ export interface DetailedExpenseReportRow {
   tagTotal: number;
   itemIndex: number;
   itemCount: number;
+
+  // Advance linkage
+  advanceRequestNumber?: string | null;
+  advanceStatus?: AdvanceStatus | null;
+  advanceAdjustedAmount: number;
+  netPayableAmount: number;
 
   // Expense item fields
   itemId: string;
@@ -125,6 +135,8 @@ export interface DetailedReportSummaryTotals {
   totalCess: number;
   totalGst: number;
   grandTotal: number;
+  totalAdvanceAdjusted: number;
+  totalNetReimbursement: number;
 }
 
 /**
@@ -314,7 +326,41 @@ export function buildExpenseItemWhereClause(
         { report: { title: { contains: q, mode: "insensitive" } } },
         { report: { user: { name: { contains: q, mode: "insensitive" } } } },
         { report: { user: { email: { contains: q, mode: "insensitive" } } } },
+        { report: { advanceAllocation: { advanceRequest: { advanceNumber: { contains: q, mode: "insensitive" } } } } },
       ],
+    });
+  }
+
+  // 15. Advance Linked Filter
+  if (filters.advanceLinked === true) {
+    andConditions.push({ report: { advanceAllocation: { isNot: null } } });
+  } else if (filters.advanceLinked === false) {
+    andConditions.push({ report: { advanceAllocation: null } });
+  }
+
+  // 16. Advance Request Number
+  if (filters.advanceRequestNumber?.trim()) {
+    andConditions.push({
+      report: {
+        advanceAllocation: {
+          advanceRequest: {
+            advanceNumber: { contains: filters.advanceRequestNumber.trim(), mode: "insensitive" },
+          },
+        },
+      },
+    });
+  }
+
+  // 17. Advance Status
+  if (filters.advanceStatus) {
+    andConditions.push({
+      report: {
+        advanceAllocation: {
+          advanceRequest: {
+            status: filters.advanceStatus,
+          },
+        },
+      },
     });
   }
 
@@ -379,6 +425,11 @@ export async function getDetailedExpenseReportData(
             user: { select: { id: true, name: true, email: true, role: true } },
             approvedBy: { select: { id: true, name: true, email: true } },
             reimbursedBy: { select: { id: true, name: true, email: true } },
+            advanceAllocation: {
+              include: {
+                advanceRequest: { select: { id: true, advanceNumber: true, status: true } },
+              },
+            },
             approvalAssignments: {
               where: { status: { not: AssignmentStatus.CANCELLED } },
               include: { assignee: { select: { id: true, name: true, email: true } } },
@@ -431,6 +482,11 @@ export async function getDetailedExpenseReportData(
       tagTotal: Number(item.report.totalAmount) || 0,
       itemIndex: skip + idx + 1,
       itemCount: item.report._count.items,
+
+      advanceRequestNumber: item.report.advanceAllocation?.advanceRequest?.advanceNumber || null,
+      advanceStatus: item.report.advanceAllocation?.advanceRequest?.status || null,
+      advanceAdjustedAmount: Number(item.report.advanceAdjustedAmount) || (item.report.advanceAllocation ? Number(item.report.advanceAllocation.allocatedAmount) : 0),
+      netPayableAmount: Number(item.report.netPayableAmount) !== undefined ? Number(item.report.netPayableAmount) : Math.max(0, (Number(item.report.totalAmount) || 0) - (Number(item.report.advanceAdjustedAmount) || 0)),
 
       itemId: item.id,
       expenseDate: formatInTimeZone(new Date(item.expenseDate), TIMEZONE, "dd-MMM-yyyy"),
@@ -495,6 +551,22 @@ export async function getDetailedExpenseReportData(
     };
   });
 
+  const uniqueReportsMap = new Map<string, { advanceAdjusted: number; netPayable: number }>();
+  for (const item of rawItems) {
+    if (!uniqueReportsMap.has(item.report.id)) {
+      const advAdj = Number(item.report.advanceAdjustedAmount) || (item.report.advanceAllocation ? Number(item.report.advanceAllocation.allocatedAmount) : 0);
+      const netPay = Number(item.report.netPayableAmount) !== undefined ? Number(item.report.netPayableAmount) : Math.max(0, (Number(item.report.totalAmount) || 0) - advAdj);
+      uniqueReportsMap.set(item.report.id, { advanceAdjusted: advAdj, netPayable: netPay });
+    }
+  }
+
+  let totalAdvanceAdjusted = 0;
+  let totalNetReimbursement = 0;
+  Array.from(uniqueReportsMap.values()).forEach((rep) => {
+    totalAdvanceAdjusted += rep.advanceAdjusted;
+    totalNetReimbursement += rep.netPayable;
+  });
+
   const summaryTotals: DetailedReportSummaryTotals = {
     itemCount: totalCount,
     totalTaxableValue: Number(summaryAggregate._sum.taxableValue) || 0,
@@ -504,6 +576,8 @@ export async function getDetailedExpenseReportData(
     totalCess: Number(summaryAggregate._sum.cessAmount) || 0,
     totalGst: Number(summaryAggregate._sum.totalGstAmount) || 0,
     grandTotal: Number(summaryAggregate._sum.totalAmount) || 0,
+    totalAdvanceAdjusted,
+    totalNetReimbursement,
   };
 
   return {

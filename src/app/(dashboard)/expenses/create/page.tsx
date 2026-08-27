@@ -19,8 +19,10 @@ import {
 } from "@/actions/expense.actions";
 import { submitExpenseReportAction } from "@/actions/workflow.actions";
 import { getCategoriesAction, getGstMastersAction } from "@/actions/master.actions";
+import { getEligibleAdvancesForExpenseAction } from "@/actions/advance.actions";
 import { ExpenseItemInput } from "@/lib/validations/expense.schema";
-import { FolderPlus, CheckCircle2, AlertCircle, Plus } from "lucide-react";
+import { FolderPlus, CheckCircle2, AlertCircle, Plus, Wallet } from "lucide-react";
+import Link from "next/link";
 
 export default function CreateExpensePage() {
   const router = useRouter();
@@ -36,6 +38,11 @@ export default function CreateExpensePage() {
   const [tagDescription, setTagDescription] = useState("");
   const [tagError, setTagError] = useState<string | null>(null);
   const [isCreatingTag, setIsCreatingTag] = useState(false);
+
+  // Company Advance States
+  const [activeAdvances, setActiveAdvances] = useState<any[]>([]);
+  const [useAdvance, setUseAdvance] = useState(false);
+  const [selectedAdvanceId, setSelectedAdvanceId] = useState("");
 
   // Active Report State
   const [activeReport, setActiveReport] = useState<ExpenseReportView | null>(null);
@@ -58,17 +65,22 @@ export default function CreateExpensePage() {
   const [existingDuplicateItem, setExistingDuplicateItem] = useState<DuplicateItemDetails | null>(null);
   const [candidateItemData, setCandidateItemData] = useState<ExpenseItemInput | null>(null);
 
-  // Load active master data on mount
+  // Load active master data and advances on mount
   useEffect(() => {
     async function loadMasters() {
       try {
-        const [cats, { treatments, rates }] = await Promise.all([
+        const [cats, { treatments, rates }, advances] = await Promise.all([
           getCategoriesAction(true),
           getGstMastersAction(true),
+          getEligibleAdvancesForExpenseAction(),
         ]);
         setCategories(cats as any);
         setGstTreatments(treatments as any);
         setGstRates(rates as any);
+        setActiveAdvances(advances || []);
+        if (advances && advances.length > 0) {
+          setSelectedAdvanceId(advances[0].id);
+        }
       } catch (err) {
         console.error("Failed to load masters:", err);
       } finally {
@@ -93,6 +105,7 @@ export default function CreateExpensePage() {
       const res = await createExpenseTagAction({
         title: tagTitle.trim().toUpperCase(),
         description: tagDescription.trim() || null,
+        advanceRequestId: useAdvance && selectedAdvanceId ? selectedAdvanceId : undefined,
       });
 
       if (!res.success || !res.report) {
@@ -105,6 +118,9 @@ export default function CreateExpensePage() {
           description: res.report.description,
           status: res.report.status,
           totalAmount: res.report.totalAmount,
+          advanceAdjustedAmount: res.report.advanceAdjustedAmount,
+          netPayableAmount: res.report.netPayableAmount,
+          advanceAllocation: res.report.advanceAllocation,
           currency: res.report.currency,
           items: [],
           createdAt: res.report.createdAt,
@@ -288,6 +304,67 @@ export default function CreateExpensePage() {
                   value={tagDescription}
                   onChange={(e) => setTagDescription(e.target.value)}
                 />
+              </div>
+
+              {/* Company Advance Toggle */}
+              <div className="pt-3 border-t border-slate-100 space-y-3">
+                <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={useAdvance}
+                    onChange={(e) => {
+                      setUseAdvance(e.target.checked);
+                      if (e.target.checked && activeAdvances.length > 0 && !selectedAdvanceId) {
+                        setSelectedAdvanceId(activeAdvances[0].id);
+                      }
+                    }}
+                    className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <div className="flex items-center gap-1.5">
+                    <Wallet className="w-4 h-4 text-emerald-600" />
+                    <span className="text-xs font-bold text-slate-800 uppercase tracking-wide">
+                      Use Company Advance for this Expense Tag?
+                    </span>
+                  </div>
+                </label>
+
+                {useAdvance && (
+                  <div className="p-3.5 bg-emerald-50/70 border border-emerald-200 rounded-md space-y-2.5">
+                    {activeAdvances.length === 0 ? (
+                      <div className="text-xs text-amber-800">
+                        You have no active disbursed company advances with available balances.
+                        <Link href="/advances/create" className="ml-1 text-emerald-700 underline font-semibold">
+                          Request an advance here.
+                        </Link>
+                      </div>
+                    ) : (
+                      <>
+                        <div>
+                          <label className="block text-[11px] font-bold text-emerald-900 uppercase tracking-wider mb-1">
+                            Select Disbursed Advance
+                          </label>
+                          <select
+                            value={selectedAdvanceId}
+                            onChange={(e) => setSelectedAdvanceId(e.target.value)}
+                            className="w-full text-xs p-2 border border-emerald-300 rounded bg-white font-medium focus:ring-1 focus:ring-emerald-500 focus:outline-none"
+                          >
+                            {activeAdvances.map((adv) => {
+                              const avail = adv.computedBalances?.availableBalance ?? (adv.disbursedAmount - adv.adjustedAmount - adv.returnedAmount - adv.reservedAmount);
+                              return (
+                                <option key={adv.id} value={adv.id}>
+                                  {adv.advanceNumber} — {adv.purpose} (Available: ₹{Number(avail).toFixed(2)})
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </div>
+                        <p className="text-[11px] text-emerald-700">
+                          The approved expense amount under this tag will automatically be deducted from your advance balance upon approval.
+                        </p>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="flex justify-end pt-4 border-t border-slate-100">

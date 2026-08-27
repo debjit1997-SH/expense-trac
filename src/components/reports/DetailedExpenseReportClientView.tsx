@@ -57,6 +57,8 @@ export function DetailedExpenseReportClientView({
     totalCess: 0,
     totalGst: 0,
     grandTotal: 0,
+    totalAdvanceAdjusted: 0,
+    totalNetReimbursement: 0,
   });
 
   const [isLoading, setIsLoading] = useState(true);

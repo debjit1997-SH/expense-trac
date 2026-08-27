@@ -66,6 +66,11 @@ export interface ExpenseReportPdfData {
   totalGst: number;
   grandTotal: number;
 
+  // Advance Adjustment
+  advanceNumber?: string | null;
+  advanceAdjustedAmount: number;
+  netPayableAmount: number;
+
   // Submitter
   submitter: {
     name: string;
@@ -118,6 +123,11 @@ export async function buildExpensePdfData(
       workflowRecipients: {
         include: {
           recipient: true,
+        },
+      },
+      advanceAllocation: {
+        include: {
+          advanceRequest: true,
         },
       },
       items: {
@@ -243,6 +253,9 @@ export async function buildExpensePdfData(
     totalCess,
     totalGst,
     grandTotal,
+    advanceNumber: report.advanceAllocation?.advanceRequest?.advanceNumber || null,
+    advanceAdjustedAmount: Number(report.advanceAdjustedAmount) || (report.advanceAllocation ? Number(report.advanceAllocation.allocatedAmount) : 0),
+    netPayableAmount: Number(report.netPayableAmount) !== undefined ? Number(report.netPayableAmount) : Math.max(0, grandTotal - (Number(report.advanceAdjustedAmount) || 0)),
     submitter: {
       name: report.user.name,
       email: report.user.email,
@@ -357,7 +370,7 @@ export async function generateExpenseSummaryPdf(data: ExpenseReportPdfData): Pro
         color: rgb(0.2, 0.25, 0.35),
       });
 
-      page.drawText(`Status: ${data.workflowStatus} (v${data.versionNumber})`, {
+      page.drawText(`Status: ${data.workflowStatus}`, {
         x: PAGE_WIDTH - MARGIN_RIGHT - 110,
         y: cursorY - 12,
         size: 8,
@@ -406,7 +419,7 @@ export async function generateExpenseSummaryPdf(data: ExpenseReportPdfData): Pro
       color: rgb(0.1, 0.15, 0.25),
     });
 
-    const statusBadgeText = `STATUS: ${data.workflowStatus} (v${data.versionNumber})`;
+    const statusBadgeText = `STATUS: ${data.workflowStatus}`;
     page.drawText(statusBadgeText, {
       x: PAGE_WIDTH - MARGIN_RIGHT - fontBold.widthOfTextAtSize(statusBadgeText, 9) - 8,
       y: cursorY - 12,
@@ -566,7 +579,49 @@ export async function generateExpenseSummaryPdf(data: ExpenseReportPdfData): Pro
   currentPage.drawText(formatInr(data.totalGst), { x: taxCols[6].x, y: cursorY - 11, size: 8, font: fontBold, color: rgb(0.1, 0.35, 0.7) });
   currentPage.drawText(formatInr(data.grandTotal), { x: taxCols[7].x, y: cursorY - 11, size: 8.5, font: fontBold, color: rgb(0.08, 0.2, 0.5) });
 
-  cursorY -= 28;
+  cursorY -= 22;
+
+  // Advance adjustment box if advance is linked
+  if (data.advanceAdjustedAmount > 0 || data.advanceNumber) {
+    currentPage.drawRectangle({
+      x: MARGIN_LEFT,
+      y: cursorY - 22,
+      width: CONTENT_WIDTH,
+      height: 22,
+      borderColor: rgb(0.7, 0.8, 0.95),
+      borderWidth: 1,
+      color: rgb(0.95, 0.97, 1),
+    });
+
+    const advLabel = data.advanceNumber ? `Company Advance (${data.advanceNumber}):` : "Company Advance Adjusted:";
+    currentPage.drawText(`Expense: INR ${formatInr(data.grandTotal)}`, {
+      x: MARGIN_LEFT + 8,
+      y: cursorY - 14,
+      size: 8,
+      font: fontRegular,
+      color: rgb(0.2, 0.25, 0.35),
+    });
+
+    currentPage.drawText(`${advLabel} -INR ${formatInr(data.advanceAdjustedAmount)}`, {
+      x: MARGIN_LEFT + 150,
+      y: cursorY - 14,
+      size: 8,
+      font: fontBold,
+      color: rgb(0.7, 0.35, 0.05),
+    });
+
+    currentPage.drawText(`Net Payable: INR ${formatInr(data.netPayableAmount)}`, {
+      x: PAGE_WIDTH - MARGIN_RIGHT - 180,
+      y: cursorY - 14,
+      size: 8.5,
+      font: fontBold,
+      color: rgb(0.08, 0.5, 0.2),
+    });
+
+    cursorY -= 28;
+  } else {
+    cursorY -= 8;
+  }
 
   // 2. DETAILED EXPENSE ITEMS TABLE
   checkNewPage(120);

@@ -39,6 +39,17 @@ export interface ExpenseReportView {
   description?: string | null;
   status: any;
   totalAmount: any;
+  advanceAdjustedAmount?: any;
+  netPayableAmount?: any;
+  advanceAllocation?: {
+    allocatedAmount: any;
+    status: string;
+    advanceRequest?: {
+      id: string;
+      advanceNumber: string;
+      purpose: string;
+    };
+  } | null;
   currency: string;
   items: ExpenseItemView[];
   createdAt: Date | string;
@@ -83,6 +94,11 @@ export function TagSummaryView({
     return acc + val;
   }, 0);
 
+  const advAdj = Number(report.advanceAdjustedAmount) || (report.advanceAllocation ? Number(report.advanceAllocation.allocatedAmount) : 0);
+  const netPayable = report.netPayableAmount !== undefined && report.netPayableAmount !== null
+    ? Number(report.netPayableAmount)
+    : Math.max(0, calculatedTotal - advAdj);
+
   return (
     <div className="space-y-6">
       {/* Header Card */}
@@ -95,6 +111,11 @@ export function TagSummaryView({
                   {report.reportNumber}
                 </span>
                 <StatusBadge status={report.status} />
+                {report.advanceAllocation?.advanceRequest && (
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-300">
+                    Linked Advance: {report.advanceAllocation.advanceRequest.advanceNumber}
+                  </span>
+                )}
               </div>
               <h2 className="text-2xl font-bold text-slate-900 mt-2 uppercase tracking-wide">
                 {report.title}
@@ -104,14 +125,26 @@ export function TagSummaryView({
               )}
             </div>
 
-            <div className="flex flex-col md:items-end p-4 rounded-lg bg-slate-50 border border-slate-200">
+            <div className="flex flex-col md:items-end p-4 rounded-lg bg-slate-50 border border-slate-200 min-w-[240px]">
               <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                Total Combined Amount
+                Total Expense Amount
               </span>
               <span className="text-2xl font-extrabold text-blue-700 mt-0.5">
                 {formatCurrencyINR(calculatedTotal)}
               </span>
-              <span className="text-xs text-slate-500 mt-1">
+
+              {advAdj > 0 && (
+                <div className="w-full mt-2 pt-2 border-t border-slate-200 text-right space-y-0.5">
+                  <div className="text-xs text-amber-700 font-medium">
+                    Less Advance: -{formatCurrencyINR(advAdj)}
+                  </div>
+                  <div className="text-xs font-bold text-emerald-700">
+                    Net Reimbursement: {formatCurrencyINR(netPayable)}
+                  </div>
+                </div>
+              )}
+
+              <span className="text-[11px] text-slate-500 mt-1">
                 {report.items.length} {report.items.length === 1 ? "Expense Item" : "Expense Items"}
               </span>
             </div>

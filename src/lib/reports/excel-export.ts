@@ -35,6 +35,13 @@ export const ALL_REPORT_COLUMNS: Record<string, ExcelColumnDef> = {
   tagDescription: { id: "tagDescription", header: "Tag Description", accessor: (r) => r.tagDescription || "", width: 28, align: "left" },
   tagStatus: { id: "tagStatus", header: "Status", accessor: (r) => r.tagStatus, width: 14, align: "center" },
   tagTotal: { id: "tagTotal", header: "Tag Total (INR)", accessor: (r) => r.tagTotal, width: 16, numFmt: "₹#,##0.00", align: "right" },
+  
+  // Advance linkage columns
+  advanceRequestNumber: { id: "advanceRequestNumber", header: "Advance Request #", accessor: (r) => r.advanceRequestNumber || "-", width: 18, align: "left" },
+  advanceStatus: { id: "advanceStatus", header: "Advance Status", accessor: (r) => r.advanceStatus || "-", width: 16, align: "center" },
+  advanceAdjustedAmount: { id: "advanceAdjustedAmount", header: "Advance Adjusted (INR)", accessor: (r) => r.advanceAdjustedAmount, width: 18, numFmt: "₹#,##0.00", align: "right" },
+  netPayableAmount: { id: "netPayableAmount", header: "Net Reimbursement (INR)", accessor: (r) => r.netPayableAmount, width: 18, numFmt: "₹#,##0.00", align: "right" },
+
   itemIndex: { id: "itemIndex", header: "Item #", accessor: (r) => r.itemIndex, width: 10, align: "center" },
   itemCount: { id: "itemCount", header: "Items In Tag", accessor: (r) => r.itemCount, width: 14, align: "center" },
 

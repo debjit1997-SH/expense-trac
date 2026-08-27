@@ -8,7 +8,7 @@ import {
   ExpenseItemSchema,
   ExpenseItemInput,
 } from "@/lib/validations/expense.schema";
-import { Role, ReportStatus, Prisma } from "@prisma/client";
+import { Role, ReportStatus, AdvanceAllocationStatus, Prisma } from "@prisma/client";
 import { Decimal } from "@prisma/client/runtime/library";
 import { logAudit } from "@/lib/audit";
 import { revalidatePath } from "next/cache";
@@ -41,6 +41,7 @@ export async function checkDuplicateExpenseItemAction(params: {
 export async function createExpenseTagAction(data: {
   title: string;
   description?: string | null;
+  advanceRequestId?: string | null;
 }) {
   try {
     const user = await requireActiveUser();
@@ -49,19 +50,51 @@ export async function createExpenseTagAction(data: {
       return { success: false, error: validated.error.errors[0]?.message };
     }
 
-    const { title, description } = validated.data;
+    const { title, description, advanceRequestId } = validated.data;
     const reportNumber = await generateReportNumber();
 
-    const report = await prisma.expenseReport.create({
-      data: {
-        reportNumber,
-        title,
-        description: description || null,
-        status: ReportStatus.DRAFT,
-        userId: user.id,
-        totalAmount: new Prisma.Decimal(0.0),
-        currency: "INR",
-      },
+    const report = await prisma.$transaction(async (tx) => {
+      const rep = await tx.expenseReport.create({
+        data: {
+          reportNumber,
+          title,
+          description: description || null,
+          status: ReportStatus.DRAFT,
+          userId: user.id,
+          totalAmount: new Prisma.Decimal(0.0),
+          currency: "INR",
+          ...(advanceRequestId
+            ? {
+                advanceAllocation: {
+                  create: {
+                    advanceRequestId,
+                    allocatedAmount: 0,
+                    status: AdvanceAllocationStatus.RESERVED,
+                  },
+                },
+              }
+            : {}),
+        },
+        include: {
+          advanceAllocation: {
+            include: {
+              advanceRequest: {
+                select: {
+                  id: true,
+                  advanceNumber: true,
+                  purpose: true,
+                  disbursedAmount: true,
+                  adjustedAmount: true,
+                  returnedAmount: true,
+                  reservedAmount: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      return rep;
     });
 
     await logAudit({
@@ -70,7 +103,7 @@ export async function createExpenseTagAction(data: {
       entityType: "ExpenseReport",
       entityId: report.id,
       reportId: report.id,
-      newVal: { reportNumber, title, status: ReportStatus.DRAFT },
+      newVal: { reportNumber, title, status: ReportStatus.DRAFT, advanceRequestId },
       reason: "New expense tag initialized",
     });
 
@@ -542,6 +575,22 @@ export async function getExpenseReportByIdAction(reportId: string) {
       documents: {
         orderBy: { versionNumber: "desc" },
       },
+      advanceAllocation: {
+        include: {
+          advanceRequest: {
+            select: {
+              id: true,
+              advanceNumber: true,
+              purpose: true,
+              status: true,
+              disbursedAmount: true,
+              adjustedAmount: true,
+              returnedAmount: true,
+              reservedAmount: true,
+            },
+          },
+        },
+      },
       auditLogs: {
         orderBy: { timestamp: "desc" },
         include: {
@@ -621,6 +670,13 @@ export async function getExpensesListAction(params?: {
     include: {
       user: {
         select: { id: true, name: true, email: true },
+      },
+      advanceAllocation: {
+        include: {
+          advanceRequest: {
+            select: { id: true, advanceNumber: true, status: true },
+          },
+        },
       },
       _count: {
         select: { items: true, evidences: true },

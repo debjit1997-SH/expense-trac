@@ -13,6 +13,8 @@ interface ReimburseExpenseModalProps {
   reportId: string;
   reportTitle: string;
   reportAmount: number | string;
+  netPayableAmount?: number | string;
+  advanceAdjustedAmount?: number | string;
   onSuccess: (updatedReport: any) => void;
 }
 
@@ -22,15 +24,23 @@ export function ReimburseExpenseModal({
   reportId,
   reportTitle,
   reportAmount,
+  netPayableAmount,
+  advanceAdjustedAmount,
   onSuccess,
 }: ReimburseExpenseModalProps) {
+  const isAdvanceSettled = Number(advanceAdjustedAmount) > 0;
+  const netPayable = netPayableAmount !== undefined ? Number(netPayableAmount) : Number(reportAmount);
+  const isZeroNet = netPayable === 0;
+
   const [reimbursementDate, setReimbursementDate] = useState<string>(
     new Date().toISOString().split("T")[0]
   );
-  const [paymentMethod, setPaymentMethod] = useState<string>("BANK_TRANSFER");
-  const [reimbursementRef, setReimbursementRef] = useState<string>("");
+  const [paymentMethod, setPaymentMethod] = useState<string>(isZeroNet ? "ADVANCE_SETTLEMENT" : "BANK_TRANSFER");
+  const [reimbursementRef, setReimbursementRef] = useState<string>(isZeroNet ? "ADV-SETTLED-CONFIRM" : "");
   const [transactionId, setTransactionId] = useState<string>("");
-  const [reimbursementNote, setReimbursementNote] = useState<string>("");
+  const [reimbursementNote, setReimbursementNote] = useState<string>(
+    isZeroNet ? "Zero-net payable expense report fully settled against employee company advance." : ""
+  );
 
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -38,15 +48,15 @@ export function ReimburseExpenseModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!reimbursementDate) {
-      setError("Please select the reimbursement payment date.");
+      setError("Please select the reimbursement settlement date.");
       return;
     }
     if (!paymentMethod) {
-      setError("Please select the payment method.");
+      setError("Please select the payment method / settlement type.");
       return;
     }
     if (!reimbursementRef.trim()) {
-      setError("Please enter the payment reference number / UTR.");
+      setError("Please enter the payment reference number / settlement confirmation.");
       return;
     }
 
@@ -78,22 +88,39 @@ export function ReimburseExpenseModal({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Disburse & Mark Expense Reimbursed"
+      title={isZeroNet ? "Confirm Zero-Net Advance Settlement" : "Disburse & Mark Expense Reimbursed"}
       maxWidth="md"
     >
       <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg flex items-center justify-between">
-          <div>
+        <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg space-y-1.5">
+          <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-emerald-800 uppercase tracking-wider">
               Reimbursing Report:
             </span>
-            <p className="text-xs font-bold text-slate-900">{reportTitle}</p>
+            <span className="text-xs font-bold text-slate-900">{reportTitle}</span>
           </div>
-          <div className="text-right">
-            <span className="text-[11px] font-bold text-emerald-800 uppercase">Total Amount</span>
-            <p className="text-base font-black text-emerald-950 font-mono">
+
+          <div className="pt-1 border-t border-emerald-200/60 flex items-center justify-between text-xs">
+            <span className="text-slate-600">Total Expense:</span>
+            <span className="font-bold text-slate-800">
               ₹{Number(reportAmount).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
-            </p>
+            </span>
+          </div>
+
+          {isAdvanceSettled && (
+            <div className="flex items-center justify-between text-xs text-amber-800">
+              <span>Less Advance Adjusted:</span>
+              <span className="font-bold">
+                -₹{Number(advanceAdjustedAmount).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+              </span>
+            </div>
+          )}
+
+          <div className="pt-1 border-t border-emerald-300 flex items-center justify-between">
+            <span className="text-xs font-bold text-emerald-900 uppercase">Net Payable to Employee:</span>
+            <span className="text-base font-black text-emerald-950 font-mono">
+              ₹{netPayable.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+            </span>
           </div>
         </div>
 

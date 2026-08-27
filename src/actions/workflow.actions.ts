@@ -2,7 +2,18 @@
 
 import prisma from "@/lib/db";
 import { requireActiveUser, requireAdmin, requireSuperAdmin } from "@/lib/auth-utils";
-import { ReportStatus, Role, AccountStatus, WorkflowStage, AssignmentStatus, RecipientType, Prisma } from "@prisma/client";
+import {
+  ReportStatus,
+  Role,
+  AccountStatus,
+  WorkflowStage,
+  AssignmentStatus,
+  RecipientType,
+  AdvanceStatus,
+  AdvanceAllocationStatus,
+  AdvanceTransactionType,
+  Prisma,
+} from "@prisma/client";
 import { logAudit } from "@/lib/audit";
 import { revalidatePath } from "next/cache";
 import {
@@ -51,10 +62,12 @@ export async function submitExpenseReportAction(data: {
   primaryApproverId?: string;
   ccUserIds?: string[];
   reason?: string;
+  advanceRequestId?: string | null;
+  advanceAdjustmentAmount?: number | null;
 }) {
   try {
     const user = await requireActiveUser();
-    const { reportId, primaryApproverId, ccUserIds = [], reason } = data;
+    const { reportId, primaryApproverId, ccUserIds = [], reason, advanceRequestId, advanceAdjustmentAmount } = data;
 
     if (!primaryApproverId) {
       return { success: false, error: "Please select a Primary Approver before submitting." };
@@ -117,6 +130,108 @@ export async function submitExpenseReportAction(data: {
         }
       }
 
+      // Handle Advance Linkage & Reservation
+      let finalAdvanceAdjusted = new Prisma.Decimal(0.00);
+      let finalNetPayable = report.totalAmount;
+
+      if (advanceRequestId && advanceAdjustmentAmount && advanceAdjustmentAmount > 0) {
+        const adv = await tx.advanceRequest.findUnique({
+          where: { id: advanceRequestId },
+        });
+
+        if (!adv) {
+          throw new Error("Selected advance request not found.");
+        }
+
+        if (adv.userId !== report.userId) {
+          throw new Error("You can only link your own company advances.");
+        }
+
+        if (adv.status !== AdvanceStatus.DISBURSED && adv.status !== AdvanceStatus.PARTIALLY_SETTLED) {
+          throw new Error(
+            `Advance must be in DISBURSED or PARTIALLY_SETTLED status to link with an expense report. Current status: ${adv.status}`
+          );
+        }
+
+        const requestedAdj = new Prisma.Decimal(Number(advanceAdjustmentAmount).toFixed(2));
+        if (requestedAdj.gt(report.totalAmount)) {
+          throw new Error(
+            `Advance adjustment amount (₹${requestedAdj.toFixed(2)}) cannot exceed total expense report amount (₹${report.totalAmount.toFixed(2)}).`
+          );
+        }
+
+        // Available balance = Disbursed - Adjusted - Returned - Reserved
+        const available = adv.disbursedAmount
+          .sub(adv.adjustedAmount)
+          .sub(adv.returnedAmount)
+          .sub(adv.reservedAmount);
+
+        if (requestedAdj.gt(available)) {
+          throw new Error(
+            `Requested adjustment (₹${requestedAdj.toFixed(2)}) exceeds available advance balance (₹${available.toFixed(2)}).`
+          );
+        }
+
+        // Upsert AdvanceAllocation in RESERVED status
+        await tx.advanceAllocation.upsert({
+          where: { expenseReportId: report.id },
+          create: {
+            advanceRequestId: adv.id,
+            expenseReportId: report.id,
+            allocatedAmount: requestedAdj,
+            status: AdvanceAllocationStatus.RESERVED,
+            reservedAt: new Date(),
+          },
+          update: {
+            advanceRequestId: adv.id,
+            allocatedAmount: requestedAdj,
+            status: AdvanceAllocationStatus.RESERVED,
+            reservedAt: new Date(),
+            settledAt: null,
+            releasedAt: null,
+            releaseReason: null,
+          },
+        });
+
+        // Atomically increase reserved amount on AdvanceRequest
+        await tx.advanceRequest.update({
+          where: { id: adv.id },
+          data: {
+            reservedAmount: adv.reservedAmount.add(requestedAdj),
+          },
+        });
+
+        finalAdvanceAdjusted = requestedAdj;
+        finalNetPayable = report.totalAmount.sub(requestedAdj);
+      } else {
+        // If an allocation was previously RESERVED and is now unlinked, release it
+        const existingAlloc = await tx.advanceAllocation.findUnique({
+          where: { expenseReportId: report.id },
+        });
+        if (existingAlloc && existingAlloc.status === AdvanceAllocationStatus.RESERVED) {
+          const adv = await tx.advanceRequest.findUnique({
+            where: { id: existingAlloc.advanceRequestId },
+          });
+          if (adv) {
+            const newRes = adv.reservedAmount.sub(existingAlloc.allocatedAmount);
+            await tx.advanceRequest.update({
+              where: { id: adv.id },
+              data: {
+                reservedAmount: newRes.lt(0) ? new Prisma.Decimal(0) : newRes,
+              },
+            });
+          }
+          await tx.advanceAllocation.update({
+            where: { id: existingAlloc.id },
+            data: {
+              status: AdvanceAllocationStatus.RELEASED,
+              releasedAt: new Date(),
+              releaseReason: "Unlinked during submission",
+            },
+          });
+        }
+      }
+
       // Cancel any prior pending assignments for this report
       await tx.approvalAssignment.updateMany({
         where: {
@@ -129,12 +244,14 @@ export async function submitExpenseReportAction(data: {
         },
       });
 
-      // Update Report Status
+      // Update Report Status & Amounts
       const updated = await tx.expenseReport.update({
         where: { id: reportId },
         data: {
           status: ReportStatus.SUBMITTED,
           submittedAt: new Date(),
+          advanceAdjustedAmount: finalAdvanceAdjusted,
+          netPayableAmount: finalNetPayable,
         },
       });
 
@@ -183,13 +300,12 @@ export async function submitExpenseReportAction(data: {
         previousVal: { status: ReportStatus.DRAFT },
         newVal: {
           status: ReportStatus.SUBMITTED,
-          totalAmount: report.totalAmount.toString(),
-          primaryApproverId,
-          primaryApproverEmail: primaryApprover.email,
+          primaryApprover: primaryApprover.email,
           ccCount: cleanCcIds.length,
-          isFallbackAssignment: primaryApprover.role === Role.SUPERADMIN,
+          advanceAdjusted: finalAdvanceAdjusted.toString(),
+          netPayable: finalNetPayable.toString(),
         },
-        reason: reason || "Report submitted with approver assignment",
+        reason: reason || "Expense report submitted for review",
         tx,
       });
 
@@ -246,6 +362,34 @@ export async function rollbackExpenseReportAction(data: {
         throw new Error(check.reason);
       }
 
+      // Release any RESERVED advance allocation
+      const existingAlloc = await tx.advanceAllocation.findUnique({
+        where: { expenseReportId: reportId },
+      });
+
+      if (existingAlloc && existingAlloc.status === AdvanceAllocationStatus.RESERVED) {
+        const adv = await tx.advanceRequest.findUnique({
+          where: { id: existingAlloc.advanceRequestId },
+        });
+        if (adv) {
+          const newRes = adv.reservedAmount.sub(existingAlloc.allocatedAmount);
+          await tx.advanceRequest.update({
+            where: { id: adv.id },
+            data: {
+              reservedAmount: newRes.lt(0) ? new Prisma.Decimal(0) : newRes,
+            },
+          });
+        }
+        await tx.advanceAllocation.update({
+          where: { id: existingAlloc.id },
+          data: {
+            status: AdvanceAllocationStatus.RELEASED,
+            releasedAt: new Date(),
+            releaseReason: reason?.trim() || "Report rolled back to DRAFT",
+          },
+        });
+      }
+
       // Cancel pending approval assignments (preserving history)
       await tx.approvalAssignment.updateMany({
         where: {
@@ -276,6 +420,8 @@ export async function rollbackExpenseReportAction(data: {
         data: {
           status: ReportStatus.DRAFT,
           submittedAt: null,
+          advanceAdjustedAmount: new Prisma.Decimal(0.00),
+          netPayableAmount: report.totalAmount,
         },
       });
 
@@ -383,6 +529,65 @@ export async function approveExpenseReportAction(data: {
         }
       }
 
+      // Handle Advance Settlement on Report Approval
+      const existingAlloc = await tx.advanceAllocation.findUnique({
+        where: { expenseReportId: report.id },
+        include: { advanceRequest: true },
+      });
+
+      let finalAdvanceAdjusted = report.advanceAdjustedAmount;
+      let finalNetPayable = report.netPayableAmount;
+
+      if (existingAlloc && existingAlloc.status === AdvanceAllocationStatus.RESERVED) {
+        const adv = existingAlloc.advanceRequest;
+        const allocAmount = existingAlloc.allocatedAmount;
+
+        // Mark allocation SETTLED
+        await tx.advanceAllocation.update({
+          where: { id: existingAlloc.id },
+          data: {
+            status: AdvanceAllocationStatus.SETTLED,
+            settledAt: new Date(),
+          },
+        });
+
+        const newReserved = adv.reservedAmount.sub(allocAmount);
+        const newAdjusted = adv.adjustedAmount.add(allocAmount);
+        const outstanding = adv.disbursedAmount.sub(newAdjusted).sub(adv.returnedAmount);
+
+        let newStatus: AdvanceStatus = AdvanceStatus.PARTIALLY_SETTLED;
+        if (outstanding.equals(new Prisma.Decimal(0)) && newReserved.equals(new Prisma.Decimal(0))) {
+          newStatus = AdvanceStatus.SETTLED;
+        }
+
+        await tx.advanceRequest.update({
+          where: { id: adv.id },
+          data: {
+            reservedAmount: newReserved.lt(0) ? new Prisma.Decimal(0) : newReserved,
+            adjustedAmount: newAdjusted,
+            status: newStatus,
+            finalSettledAt: newStatus === AdvanceStatus.SETTLED ? new Date() : adv.finalSettledAt,
+          },
+        });
+
+        // Create Ledger Entry for EXPENSE_ADJUSTMENT
+        await tx.advanceLedgerEntry.create({
+          data: {
+            advanceRequestId: adv.id,
+            type: AdvanceTransactionType.EXPENSE_ADJUSTMENT,
+            amount: allocAmount,
+            runningBalance: outstanding.lt(0) ? new Prisma.Decimal(0) : outstanding,
+            expenseReportId: report.id,
+            performedById: reviewer.id,
+            remark: `Adjusted against approved expense report ${report.reportNumber}`,
+            timestamp: new Date(),
+          },
+        });
+
+        finalAdvanceAdjusted = allocAmount;
+        finalNetPayable = report.totalAmount.sub(allocAmount);
+      }
+
       // Mark Admin approval assignment COMPLETED
       if (activeAssignment) {
         await tx.approvalAssignment.update({
@@ -402,6 +607,8 @@ export async function approveExpenseReportAction(data: {
           approvedById: reviewer.id,
           approvedAt: new Date(),
           approvalNote: approvalNote?.trim() || null,
+          advanceAdjustedAmount: finalAdvanceAdjusted,
+          netPayableAmount: finalNetPayable,
         },
       });
 
@@ -536,6 +743,11 @@ export async function reimburseExpenseReportAction(data: {
         });
       }
 
+      const isZeroPayable = report.netPayableAmount.equals(new Prisma.Decimal(0));
+      const effectivePaymentMethod = paymentMethod?.trim() || (isZeroPayable ? "ADVANCE_ADJUSTED" : "BANK_TRANSFER");
+      const effectiveRef = reimbursementRef?.trim() || (isZeroPayable ? "ADV-SETTLED" : "REF-NONE");
+      const effectiveNote = reimbursementNote?.trim() || (isZeroPayable ? `Fully settled against employee advance (₹${report.advanceAdjustedAmount.toFixed(2)})` : null);
+
       const updated = await tx.expenseReport.update({
         where: { id: reportId },
         data: {
@@ -543,10 +755,10 @@ export async function reimburseExpenseReportAction(data: {
           reimbursedById: superAdmin.id,
           reimbursedAt: new Date(),
           reimbursementDate: new Date(reimbursementDate),
-          paymentMethod: paymentMethod.trim(),
-          reimbursementRef: reimbursementRef.trim(),
+          paymentMethod: effectivePaymentMethod,
+          reimbursementRef: effectiveRef,
           transactionId: transactionId?.trim() || null,
-          reimbursementNote: reimbursementNote?.trim() || null,
+          reimbursementNote: effectiveNote,
         },
       });
 
@@ -561,12 +773,14 @@ export async function reimburseExpenseReportAction(data: {
           status: ReportStatus.REIMBURSED,
           reimbursedBy: superAdmin.email,
           reimbursementDate,
-          paymentMethod,
-          reimbursementRef,
+          paymentMethod: effectivePaymentMethod,
+          reimbursementRef: effectiveRef,
           transactionId,
-          reimbursementNote,
+          reimbursementNote: effectiveNote,
+          advanceAdjusted: report.advanceAdjustedAmount.toString(),
+          netPayable: report.netPayableAmount.toString(),
         },
-        reason: reimbursementNote?.trim() || "Expense report marked as reimbursed by superadmin",
+        reason: effectiveNote || "Expense report marked as reimbursed by superadmin",
         tx,
       });
 
@@ -766,6 +980,11 @@ export async function getAdminApprovalInboxAction(
         where: { workflowStage: WorkflowStage.ADMIN_APPROVAL },
         include: { recipient: { select: { id: true, name: true, email: true } } },
       },
+      advanceAllocation: {
+        include: {
+          advanceRequest: { select: { id: true, advanceNumber: true, status: true } },
+        },
+      },
       items: {
         select: { id: true, totalAmount: true, totalGstAmount: true },
       },
@@ -831,6 +1050,11 @@ export async function getSuperadminReimbursementInboxAction(
       workflowRecipients: {
         where: { workflowStage: WorkflowStage.REIMBURSEMENT },
         include: { recipient: { select: { id: true, name: true, email: true } } },
+      },
+      advanceAllocation: {
+        include: {
+          advanceRequest: { select: { id: true, advanceNumber: true, status: true } },
+        },
       },
       items: {
         select: { id: true, totalAmount: true, totalGstAmount: true },
