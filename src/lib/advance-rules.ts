@@ -239,13 +239,22 @@ export function canApproveAdvanceRequest(params: {
  * Permission rule: Can actor disburse this advance?
  */
 export function canDisburseAdvance(params: {
+  requesterId?: string | null;
+  currentUserId?: string | null;
   currentUserRole: Role;
   status: AdvanceStatus;
 }): { allowed: boolean; reason?: string } {
-  const { currentUserRole, status } = params;
+  const { requesterId, currentUserId, currentUserRole, status } = params;
 
   if (currentUserRole !== Role.SUPERADMIN) {
-    return { allowed: false, reason: "Only Superadmins can disburse employee advances." };
+    return { allowed: false, reason: "Only active Superadmins can disburse employee advances." };
+  }
+
+  if (requesterId && currentUserId && requesterId === currentUserId) {
+    return {
+      allowed: false,
+      reason: "Self-disbursement is prohibited. A requester cannot disburse their own advance request.",
+    };
   }
 
   if (status !== AdvanceStatus.APPROVED) {

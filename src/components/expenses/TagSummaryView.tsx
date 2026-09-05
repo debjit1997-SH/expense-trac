@@ -6,6 +6,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import { StatusBadge } from "@/components/expenses/StatusBadge";
 import { DateDisplay } from "@/components/common/DateDisplay";
 import { formatCurrencyINR } from "@/lib/formatters";
+import { getNormalizedAdvanceSummary } from "@/lib/advance-summary";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import {
   Plus,
@@ -89,15 +90,15 @@ export function TagSummaryView({
     }
   };
 
-  const calculatedTotal = report.items.reduce((acc, item) => {
+    const calculatedTotal = report.items.reduce((acc, item) => {
     const val = Number(item.totalAmount) || 0;
     return acc + val;
   }, 0);
 
-  const advAdj = Number(report.advanceAdjustedAmount) || (report.advanceAllocation ? Number(report.advanceAllocation.allocatedAmount) : 0);
-  const netPayable = report.netPayableAmount !== undefined && report.netPayableAmount !== null
-    ? Number(report.netPayableAmount)
-    : Math.max(0, calculatedTotal - advAdj);
+  const advanceSummary = getNormalizedAdvanceSummary({
+    ...report,
+    totalAmount: calculatedTotal,
+  });
 
   return (
     <div className="space-y-6">
@@ -111,9 +112,9 @@ export function TagSummaryView({
                   {report.reportNumber}
                 </span>
                 <StatusBadge status={report.status} />
-                {report.advanceAllocation?.advanceRequest && (
-                  <span className="text-xs font-semibold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-300">
-                    Linked Advance: {report.advanceAllocation.advanceRequest.advanceNumber}
+                {advanceSummary.hasLinkedAdvance && advanceSummary.advanceNumber && (
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-300 font-mono">
+                    Linked Advance: {advanceSummary.advanceNumber}
                   </span>
                 )}
               </div>
@@ -125,7 +126,7 @@ export function TagSummaryView({
               )}
             </div>
 
-            <div className="flex flex-col md:items-end p-4 rounded-lg bg-slate-50 border border-slate-200 min-w-[240px]">
+            <div className="flex flex-col md:items-end p-4 rounded-lg bg-slate-50 border border-slate-200 min-w-[260px]">
               <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
                 Total Expense Amount
               </span>
@@ -133,13 +134,25 @@ export function TagSummaryView({
                 {formatCurrencyINR(calculatedTotal)}
               </span>
 
-              {advAdj > 0 && (
-                <div className="w-full mt-2 pt-2 border-t border-slate-200 text-right space-y-0.5">
-                  <div className="text-xs text-amber-700 font-medium">
-                    Less Advance: -{formatCurrencyINR(advAdj)}
+              {advanceSummary.hasLinkedAdvance && (
+                <div className="w-full mt-2 pt-2 border-t border-slate-200 text-right space-y-1">
+                  <div className="text-[11px] text-slate-600 flex justify-between gap-3">
+                    <span>Advance Disbursed:</span>
+                    <strong className="font-mono">{formatCurrencyINR(advanceSummary.disbursedAmount)}</strong>
                   </div>
-                  <div className="text-xs font-bold text-emerald-700">
-                    Net Reimbursement: {formatCurrencyINR(netPayable)}
+                  <div className="text-xs text-amber-700 font-semibold flex justify-between gap-3">
+                    <span>{advanceSummary.allocationLabel}:</span>
+                    <span className="font-mono">-{formatCurrencyINR(advanceSummary.allocatedAmount)}</span>
+                  </div>
+                  <div className="text-xs font-bold text-emerald-700 flex justify-between gap-3 pt-0.5 border-t border-slate-200/60">
+                    <span>{advanceSummary.netPayableLabel}:</span>
+                    <span className="font-mono">{formatCurrencyINR(advanceSummary.expectedNetReimbursement)}</span>
+                  </div>
+                  <div className="text-[11px] text-slate-500 flex justify-between gap-3 pt-0.5">
+                    <span>Remaining Available:</span>
+                    <span className="font-mono font-medium text-slate-700">
+                      {formatCurrencyINR(advanceSummary.remainingAvailableBalance)}
+                    </span>
                   </div>
                 </div>
               )}

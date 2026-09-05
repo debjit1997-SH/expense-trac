@@ -379,18 +379,30 @@ export function AdvanceDetailClientView({
 
           {/* Workflow Sign-offs */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 border-t border-slate-100">
-            <div className="p-2.5 bg-slate-50 rounded border border-slate-200">
+            <div className="p-2.5 bg-slate-50 rounded border border-slate-200 space-y-1">
               <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Submission</p>
-              <p className="text-xs font-semibold text-slate-800 mt-1">{advance.user.name}</p>
-              <p className="text-[11px] text-slate-400">{advance.submittedAt ? <DateDisplay date={advance.submittedAt} /> : "Draft"}</p>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-xs font-bold text-slate-900">{advance.user.name}</span>
+                <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-200 text-slate-700">
+                  {advance.user.role}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500">{advance.user.email}</p>
+              <p className="text-[11px] text-slate-400 mt-1">{advance.submittedAt ? <DateDisplay date={advance.submittedAt} /> : "Draft"}</p>
             </div>
 
-            <div className="p-2.5 bg-slate-50 rounded border border-slate-200">
+            <div className="p-2.5 bg-slate-50 rounded border border-slate-200 space-y-1">
               <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Admin Approval</p>
               {advance.approvedBy ? (
                 <>
-                  <p className="text-xs font-semibold text-slate-800 mt-1">{advance.approvedBy.name}</p>
-                  <p className="text-[11px] text-slate-400"><DateDisplay date={advance.approvedAt} /></p>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-xs font-bold text-slate-900">{advance.approvedBy.name}</span>
+                    <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-800">
+                      {advance.approvedBy.role}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500">{advance.approvedBy.email}</p>
+                  <p className="text-[11px] text-slate-400 mt-1"><DateDisplay date={advance.approvedAt} /></p>
                   {advance.approvalNote && <p className="text-[11px] text-slate-600 mt-0.5 italic">"{advance.approvalNote}"</p>}
                 </>
               ) : (
@@ -398,12 +410,18 @@ export function AdvanceDetailClientView({
               )}
             </div>
 
-            <div className="p-2.5 bg-slate-50 rounded border border-slate-200">
+            <div className="p-2.5 bg-slate-50 rounded border border-slate-200 space-y-1">
               <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Disbursement (Superadmin)</p>
               {advance.disbursedBy ? (
                 <>
-                  <p className="text-xs font-semibold text-slate-800 mt-1">{advance.disbursedBy.name}</p>
-                  <p className="text-[11px] text-slate-400"><DateDisplay date={advance.disbursedAt} /></p>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-xs font-bold text-slate-900">{advance.disbursedBy.name}</span>
+                    <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-purple-100 text-purple-800">
+                      {advance.disbursedBy.role}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500">{advance.disbursedBy.email}</p>
+                  <p className="text-[11px] text-slate-400 mt-1"><DateDisplay date={advance.disbursedAt} /></p>
                   <p className="text-[11px] text-purple-700 font-mono mt-0.5">{advance.paymentMode}: {advance.paymentReference}</p>
                 </>
               ) : (

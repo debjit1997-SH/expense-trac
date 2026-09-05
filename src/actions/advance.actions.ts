@@ -491,6 +491,8 @@ export async function disburseAdvanceAction(data: {
       }
 
       const check = canDisburseAdvance({
+        requesterId: advance.userId,
+        currentUserId: superAdmin.id,
         currentUserRole: superAdmin.role,
         status: advance.status,
       });
@@ -505,8 +507,11 @@ export async function disburseAdvanceAction(data: {
 
       const approvedAmt = advance.approvedAmount;
 
-      const updated = await tx.advanceRequest.update({
-        where: { id: advanceId },
+      const updateCount = await tx.advanceRequest.updateMany({
+        where: {
+          id: advanceId,
+          status: AdvanceStatus.APPROVED,
+        },
         data: {
           status: AdvanceStatus.DISBURSED,
           disbursedAmount: approvedAmt,
@@ -516,6 +521,16 @@ export async function disburseAdvanceAction(data: {
           paymentReference: paymentReference.trim(),
           disbursementRemark: disbursementRemark?.trim() || null,
         },
+      });
+
+      if (updateCount.count === 0) {
+        throw new Error(
+          "Advance request cannot be disbursed. It may have already been disbursed or is not in APPROVED status."
+        );
+      }
+
+      const updated = await tx.advanceRequest.findUniqueOrThrow({
+        where: { id: advanceId },
       });
 
       // Create Ledger Entry for DISBURSEMENT
@@ -544,7 +559,8 @@ export async function disburseAdvanceAction(data: {
           disbursedAmount: approvedAmt.toString(),
           paymentMode: paymentMode.trim(),
           paymentReference: paymentReference.trim(),
-          disbursedBy: superAdmin.email,
+          disbursedBy: `${superAdmin.name} (${superAdmin.role} - ${superAdmin.email})`,
+          disbursedToRequesterId: advance.userId,
         },
         reason: disbursementRemark?.trim() || "Employee advance disbursed by Superadmin",
         tx,
@@ -817,8 +833,8 @@ export async function getAdvancesListAction(params?: {
     orderBy: { createdAt: "desc" },
     include: {
       user: { select: { id: true, name: true, email: true, role: true } },
-      approvedBy: { select: { id: true, name: true, email: true } },
-      disbursedBy: { select: { id: true, name: true, email: true } },
+      approvedBy: { select: { id: true, name: true, email: true, role: true } },
+      disbursedBy: { select: { id: true, name: true, email: true, role: true } },
       _count: { select: { allocations: true, transactions: true, evidences: true } },
     },
   });
@@ -836,8 +852,8 @@ export async function getAdvanceDetailAction(id: string) {
     where: { id },
     include: {
       user: { select: { id: true, name: true, email: true, phone: true, role: true } },
-      approvedBy: { select: { id: true, name: true, email: true } },
-      disbursedBy: { select: { id: true, name: true, email: true } },
+      approvedBy: { select: { id: true, name: true, email: true, role: true } },
+      disbursedBy: { select: { id: true, name: true, email: true, role: true } },
       evidences: {
         include: { uploader: { select: { id: true, name: true } } },
       },

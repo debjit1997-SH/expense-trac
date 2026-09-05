@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { StatusBadge } from "@/components/expenses/StatusBadge";
 import { DateDisplay } from "@/components/common/DateDisplay";
 import { formatCurrencyINR } from "@/lib/formatters";
+import { getNormalizedAdvanceSummary } from "@/lib/advance-summary";
 import { AuditTimeline } from "@/components/common/AuditTimeline";
 import { ReportActionControls } from "./ReportActionControls";
 import { ReportPdfControls } from "@/components/expenses/ReportPdfControls";
@@ -99,14 +100,8 @@ export default async function ReportDetailPage({ params }: ReportDetailPageProps
     }
   }
 
-  const advanceAdjustedAmount =
-    Number(report.advanceAdjustedAmount) ||
-    (report.advanceAllocation ? Number(report.advanceAllocation.allocatedAmount) : 0);
-  const netPayableAmount =
-    report.netPayableAmount !== undefined && report.netPayableAmount !== null
-      ? Number(report.netPayableAmount)
-      : Math.max(0, Number(report.totalAmount) - advanceAdjustedAmount);
-  const isZeroNetSettlement = netPayableAmount === 0 && advanceAdjustedAmount > 0;
+  const advanceSummary = getNormalizedAdvanceSummary(report as any);
+  const isZeroNetSettlement = advanceSummary.hasLinkedAdvance && advanceSummary.expectedNetReimbursement === 0 && advanceSummary.allocatedAmount > 0;
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
@@ -154,22 +149,27 @@ export default async function ReportDetailPage({ params }: ReportDetailPageProps
                 )}
               </div>
 
-              {report.advanceAllocation?.advanceRequest && (
-                <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-2">
+              {advanceSummary.hasLinkedAdvance && advanceSummary.advanceId && (
+                <div className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap items-center gap-2">
                   <span className="text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded">
                     Linked Company Advance:
                     <Link
-                      href={`/advances/${report.advanceAllocation.advanceRequest.id}`}
+                      href={`/advances/${advanceSummary.advanceId}`}
                       className="ml-1.5 font-bold font-mono underline hover:text-emerald-950"
                     >
-                      {report.advanceAllocation.advanceRequest.advanceNumber}
+                      {advanceSummary.advanceNumber}
                     </Link>
                   </span>
+                  {advanceSummary.isPendingHistoricalAllocation && (
+                    <span className="text-[11px] font-medium text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded">
+                      Allocation pending review at approval
+                    </span>
+                  )}
                 </div>
               )}
             </div>
 
-            <div className="flex flex-col md:items-end p-4 rounded-lg bg-slate-50 border border-slate-200 shrink-0 min-w-[220px]">
+            <div className="flex flex-col md:items-end p-4 rounded-lg bg-slate-50 border border-slate-200 shrink-0 min-w-[260px]">
               <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
                 Total Expense Amount
               </span>
@@ -177,18 +177,30 @@ export default async function ReportDetailPage({ params }: ReportDetailPageProps
                 {formatCurrencyINR(report.totalAmount)}
               </span>
 
-              {(advanceAdjustedAmount > 0 || report.advanceAllocation) && (
-                <div className="w-full mt-2 pt-2 border-t border-slate-200 text-right space-y-0.5">
-                  <div className="text-xs text-amber-700 font-medium">
-                    Less Advance: -{formatCurrencyINR(advanceAdjustedAmount)}
+              {advanceSummary.hasLinkedAdvance && (
+                <div className="w-full mt-2 pt-2 border-t border-slate-200 text-right space-y-1">
+                  <div className="text-[11px] text-slate-600 flex justify-between gap-3">
+                    <span>Advance Disbursed:</span>
+                    <strong className="font-mono">{formatCurrencyINR(advanceSummary.disbursedAmount)}</strong>
                   </div>
-                  <div className="text-xs font-extrabold text-emerald-700">
-                    Net Reimbursement: {formatCurrencyINR(netPayableAmount)}
+                  <div className="text-xs text-amber-700 font-semibold flex justify-between gap-3">
+                    <span>{advanceSummary.allocationLabel}:</span>
+                    <span className="font-mono">-{formatCurrencyINR(advanceSummary.allocatedAmount)}</span>
+                  </div>
+                  <div className="text-xs font-extrabold text-emerald-700 flex justify-between gap-3 pt-0.5 border-t border-slate-200/60">
+                    <span>{advanceSummary.netPayableLabel}:</span>
+                    <span className="font-mono">{formatCurrencyINR(advanceSummary.expectedNetReimbursement)}</span>
+                  </div>
+                  <div className="text-[11px] text-slate-500 flex justify-between gap-3 pt-0.5">
+                    <span>Remaining Available Balance:</span>
+                    <span className="font-mono font-medium text-slate-700">
+                      {formatCurrencyINR(advanceSummary.remainingAvailableBalance)}
+                    </span>
                   </div>
                 </div>
               )}
 
-              <span className="text-xs text-slate-500 mt-1">
+              <span className="text-xs text-slate-500 mt-2">
                 {report.items.length} {report.items.length === 1 ? "Item" : "Items"}
               </span>
             </div>
@@ -323,7 +335,7 @@ export default async function ReportDetailPage({ params }: ReportDetailPageProps
                   ) : (
                     <>
                       <p className="text-purple-900 font-bold mt-1">
-                        Amount paid to employee: <span className="font-mono">{formatCurrencyINR(netPayableAmount)}</span>
+                        Amount paid to employee: <span className="font-mono">{formatCurrencyINR(advanceSummary.expectedNetReimbursement)}</span>
                       </p>
                       {report.paymentMethod && (
                         <p className="text-slate-700 font-semibold">
@@ -370,9 +382,9 @@ export default async function ReportDetailPage({ params }: ReportDetailPageProps
         primaryReimbursementOwnerId={activeReimbursementAssignment?.assigneeUserId}
         primaryReimbursementOwnerName={activeReimbursementAssignment?.assignee?.name}
         eligibleReassignUsers={eligibleReassignUsers}
-        advanceAdjustedAmount={advanceAdjustedAmount}
-        netPayableAmount={netPayableAmount}
-        advanceRequestNumber={report.advanceAllocation?.advanceRequest?.advanceNumber}
+        advanceAdjustedAmount={advanceSummary.allocatedAmount}
+        netPayableAmount={advanceSummary.expectedNetReimbursement}
+        advanceRequestNumber={advanceSummary.advanceNumber}
       />
 
       {/* Versioned PDF Controls & Document History */}

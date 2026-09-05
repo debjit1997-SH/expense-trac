@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { StatusBadge } from "@/components/expenses/StatusBadge";
 import { DateDisplay } from "@/components/common/DateDisplay";
 import { formatCurrencyINR } from "@/lib/formatters";
+import { getNormalizedAdvanceSummary } from "@/lib/advance-summary";
 import { SelectReimbursementOwnerModal } from "@/components/workflow/SelectReimbursementOwnerModal";
 import { ReassignApproverModal } from "@/components/workflow/ReassignApproverModal";
 import { getEligibleApproversAction } from "@/actions/workflow.actions";
@@ -175,6 +176,8 @@ export function ApprovalInboxClientView({
               0
             );
 
+            const advanceSummary = getNormalizedAdvanceSummary(report);
+
             return (
               <Card
                 key={report.id}
@@ -188,6 +191,11 @@ export function ApprovalInboxClientView({
                           {report.reportNumber}
                         </span>
                         <StatusBadge status={report.status} />
+                        {advanceSummary.hasLinkedAdvance && (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200 font-mono">
+                            ADVANCE: {advanceSummary.advanceNumber}
+                          </span>
+                        )}
                         {isAssignedToMe && (
                           <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200">
                             ASSIGNED TO YOU
@@ -211,11 +219,20 @@ export function ApprovalInboxClientView({
                       <p className="text-xl font-black text-slate-950 font-mono">
                         {formatCurrencyINR(report.totalAmount)}
                       </p>
-                      {totalGst > 0 && (
+                      {advanceSummary.hasLinkedAdvance ? (
+                        <div className="text-right text-xs mt-1 space-y-0.5">
+                          <p className="text-amber-700 font-semibold">
+                            {advanceSummary.allocationLabel}: -{formatCurrencyINR(advanceSummary.allocatedAmount)}
+                          </p>
+                          <p className="text-emerald-700 font-black">
+                            {advanceSummary.netPayableLabel}: {formatCurrencyINR(advanceSummary.expectedNetReimbursement)}
+                          </p>
+                        </div>
+                      ) : totalGst > 0 ? (
                         <p className="text-[11px] text-blue-700 font-semibold">
                           GST Included: {formatCurrencyINR(totalGst)}
                         </p>
-                      )}
+                      ) : null}
                     </div>
                   </div>
 

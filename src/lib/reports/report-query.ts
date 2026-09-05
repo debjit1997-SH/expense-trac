@@ -13,6 +13,7 @@ import {
 } from "@prisma/client";
 import { formatInTimeZone, toDate } from "date-fns-tz";
 import { startOfMonth, endOfMonth } from "date-fns";
+import { getNormalizedAdvanceSummary } from "@/lib/advance-summary";
 
 export const TIMEZONE = "Asia/Kolkata";
 
@@ -427,7 +428,19 @@ export async function getDetailedExpenseReportData(
             reimbursedBy: { select: { id: true, name: true, email: true } },
             advanceAllocation: {
               include: {
-                advanceRequest: { select: { id: true, advanceNumber: true, status: true } },
+                advanceRequest: {
+                  select: {
+                    id: true,
+                    advanceNumber: true,
+                    status: true,
+                    requestedAmount: true,
+                    approvedAmount: true,
+                    disbursedAmount: true,
+                    adjustedAmount: true,
+                    returnedAmount: true,
+                    reservedAmount: true,
+                  },
+                },
               },
             },
             approvalAssignments: {
@@ -473,6 +486,8 @@ export async function getDetailedExpenseReportData(
     const totalGstAmount = Number(item.totalGstAmount) || 0;
     const itemAmount = Number(item.totalAmount) || 0;
 
+    const advanceSummary = getNormalizedAdvanceSummary(item.report as any);
+
     return {
       reportId: item.report.id,
       reportNumber: item.report.reportNumber,
@@ -483,10 +498,10 @@ export async function getDetailedExpenseReportData(
       itemIndex: skip + idx + 1,
       itemCount: item.report._count.items,
 
-      advanceRequestNumber: item.report.advanceAllocation?.advanceRequest?.advanceNumber || null,
-      advanceStatus: item.report.advanceAllocation?.advanceRequest?.status || null,
-      advanceAdjustedAmount: Number(item.report.advanceAdjustedAmount) || (item.report.advanceAllocation ? Number(item.report.advanceAllocation.allocatedAmount) : 0),
-      netPayableAmount: Number(item.report.netPayableAmount) !== undefined ? Number(item.report.netPayableAmount) : Math.max(0, (Number(item.report.totalAmount) || 0) - (Number(item.report.advanceAdjustedAmount) || 0)),
+      advanceRequestNumber: advanceSummary.advanceNumber,
+      advanceStatus: advanceSummary.advanceStatus,
+      advanceAdjustedAmount: advanceSummary.allocatedAmount,
+      netPayableAmount: advanceSummary.expectedNetReimbursement,
 
       itemId: item.id,
       expenseDate: formatInTimeZone(new Date(item.expenseDate), TIMEZONE, "dd-MMM-yyyy"),
@@ -554,9 +569,11 @@ export async function getDetailedExpenseReportData(
   const uniqueReportsMap = new Map<string, { advanceAdjusted: number; netPayable: number }>();
   for (const item of rawItems) {
     if (!uniqueReportsMap.has(item.report.id)) {
-      const advAdj = Number(item.report.advanceAdjustedAmount) || (item.report.advanceAllocation ? Number(item.report.advanceAllocation.allocatedAmount) : 0);
-      const netPay = Number(item.report.netPayableAmount) !== undefined ? Number(item.report.netPayableAmount) : Math.max(0, (Number(item.report.totalAmount) || 0) - advAdj);
-      uniqueReportsMap.set(item.report.id, { advanceAdjusted: advAdj, netPayable: netPay });
+      const summary = getNormalizedAdvanceSummary(item.report as any);
+      uniqueReportsMap.set(item.report.id, {
+        advanceAdjusted: summary.allocatedAmount,
+        netPayable: summary.expectedNetReimbursement,
+      });
     }
   }
 

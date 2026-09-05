@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { StatusBadge } from "@/components/expenses/StatusBadge";
 import { DateDisplay } from "@/components/common/DateDisplay";
 import { formatCurrencyINR } from "@/lib/formatters";
+import { getNormalizedAdvanceSummary } from "@/lib/advance-summary";
 import { ReimburseExpenseModal } from "@/components/workflow/ReimburseExpenseModal";
 import { ReassignApproverModal } from "@/components/workflow/ReassignApproverModal";
 import { getEligibleReimbursementOwnersAction } from "@/actions/workflow.actions";
@@ -165,6 +166,8 @@ export function ReimbursementInboxClientView({
               0
             );
 
+            const advanceSummary = getNormalizedAdvanceSummary(report);
+
             return (
               <Card
                 key={report.id}
@@ -178,6 +181,11 @@ export function ReimbursementInboxClientView({
                           {report.reportNumber}
                         </span>
                         <StatusBadge status={report.status} />
+                        {advanceSummary.hasLinkedAdvance && (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200 font-mono">
+                            ADVANCE: {advanceSummary.advanceNumber}
+                          </span>
+                        )}
                         {isAssignedToMe && (
                           <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-100 text-purple-800 border border-purple-200">
                             ASSIGNED TO YOU
@@ -191,14 +199,14 @@ export function ReimbursementInboxClientView({
 
                     <div className="text-right">
                       <span className="text-xs font-semibold text-slate-500 uppercase">
-                        {Number(report.advanceAdjustedAmount) > 0 ? "Net Reimbursement" : "Total Amount"}
+                        {advanceSummary.hasLinkedAdvance ? advanceSummary.netPayableLabel : "Total Amount"}
                       </span>
                       <p className="text-xl font-black text-slate-950 font-mono">
-                        {formatCurrencyINR(report.netPayableAmount !== undefined && report.netPayableAmount !== null ? report.netPayableAmount : Math.max(0, Number(report.totalAmount) - (Number(report.advanceAdjustedAmount) || 0)))}
+                        {formatCurrencyINR(advanceSummary.hasLinkedAdvance ? advanceSummary.expectedNetReimbursement : report.totalAmount)}
                       </p>
-                      {Number(report.advanceAdjustedAmount) > 0 && (
+                      {advanceSummary.hasLinkedAdvance && (
                         <p className="text-[11px] text-amber-700 font-semibold">
-                          Advance Adjusted: -{formatCurrencyINR(report.advanceAdjustedAmount)}
+                          {advanceSummary.allocationLabel}: -{formatCurrencyINR(advanceSummary.allocatedAmount)}
                         </p>
                       )}
                       {totalGst > 0 && (
@@ -316,12 +324,9 @@ export function ReimbursementInboxClientView({
           reportId={selectedReport.id}
           reportTitle={selectedReport.title}
           reportAmount={Number(selectedReport.totalAmount)}
-          advanceAdjustedAmount={
-            selectedReport.advanceAdjustedAmount ||
-            (selectedReport.advanceAllocation ? Number(selectedReport.advanceAllocation.allocatedAmount) : 0)
-          }
-          netPayableAmount={selectedReport.netPayableAmount}
-          advanceRequestNumber={selectedReport.advanceAllocation?.advanceRequest?.advanceNumber}
+          advanceAdjustedAmount={getNormalizedAdvanceSummary(selectedReport).allocatedAmount}
+          netPayableAmount={getNormalizedAdvanceSummary(selectedReport).expectedNetReimbursement}
+          advanceRequestNumber={getNormalizedAdvanceSummary(selectedReport).advanceNumber}
           onSuccess={() => {
             setReimburseModalOpen(false);
             router.refresh();

@@ -3,6 +3,7 @@ import prisma from "../db";
 import { downloadStorageFile, uploadDocumentPdf } from "../storage";
 import { formatInTimeZone } from "date-fns-tz";
 import { Role, ReportStatus, DocumentGenStatus, WorkflowStage, AssignmentStatus, RecipientType } from "@prisma/client";
+import { getNormalizedAdvanceSummary, NormalizedAdvanceSummary } from "@/lib/advance-summary";
 import crypto from "crypto";
 
 const TIMEZONE = "Asia/Kolkata";
@@ -70,6 +71,7 @@ export interface ExpenseReportPdfData {
   advanceNumber?: string | null;
   advanceAdjustedAmount: number;
   netPayableAmount: number;
+  advanceSummary?: NormalizedAdvanceSummary;
 
   // Submitter
   submitter: {
@@ -127,7 +129,11 @@ export async function buildExpensePdfData(
       },
       advanceAllocation: {
         include: {
-          advanceRequest: true,
+          advanceRequest: {
+            include: {
+              user: true,
+            },
+          },
         },
       },
       items: {
@@ -227,35 +233,38 @@ export async function buildExpensePdfData(
     .filter((r) => r.workflowStage === WorkflowStage.ADMIN_APPROVAL && r.recipientType === RecipientType.CC)
     .map((r) => r.recipient.name);
 
-  return {
-    id: report.id,
-    reportNumber: report.reportNumber,
-    title: report.title,
-    description: report.description,
-    workflowStatus: effectiveStatus,
-    versionNumber,
-    createdAt: formatInTimeZone(new Date(report.createdAt), TIMEZONE, "dd-MMM-yyyy HH:mm:ss"),
-    submittedAt: report.submittedAt
-      ? formatInTimeZone(new Date(report.submittedAt), TIMEZONE, "dd-MMM-yyyy HH:mm:ss")
-      : null,
-    approvedAt: report.approvedAt
-      ? formatInTimeZone(new Date(report.approvedAt), TIMEZONE, "dd-MMM-yyyy HH:mm:ss")
-      : null,
-    reimbursedAt: report.reimbursedAt
-      ? formatInTimeZone(new Date(report.reimbursedAt), TIMEZONE, "dd-MMM-yyyy HH:mm:ss")
-      : null,
-    currency: report.currency,
-    itemCount: items.length,
-    totalTaxableValue,
-    totalCgst,
-    totalSgst,
-    totalIgst,
-    totalCess,
-    totalGst,
-    grandTotal,
-    advanceNumber: report.advanceAllocation?.advanceRequest?.advanceNumber || null,
-    advanceAdjustedAmount: Number(report.advanceAdjustedAmount) || (report.advanceAllocation ? Number(report.advanceAllocation.allocatedAmount) : 0),
-    netPayableAmount: Number(report.netPayableAmount) !== undefined ? Number(report.netPayableAmount) : Math.max(0, grandTotal - (Number(report.advanceAdjustedAmount) || 0)),
+    const advanceSummary = getNormalizedAdvanceSummary(report as any);
+
+    return {
+      id: report.id,
+      reportNumber: report.reportNumber,
+      title: report.title,
+      description: report.description,
+      workflowStatus: effectiveStatus,
+      versionNumber,
+      createdAt: formatInTimeZone(new Date(report.createdAt), TIMEZONE, "dd-MMM-yyyy HH:mm:ss"),
+      submittedAt: report.submittedAt
+        ? formatInTimeZone(new Date(report.submittedAt), TIMEZONE, "dd-MMM-yyyy HH:mm:ss")
+        : null,
+      approvedAt: report.approvedAt
+        ? formatInTimeZone(new Date(report.approvedAt), TIMEZONE, "dd-MMM-yyyy HH:mm:ss")
+        : null,
+      reimbursedAt: report.reimbursedAt
+        ? formatInTimeZone(new Date(report.reimbursedAt), TIMEZONE, "dd-MMM-yyyy HH:mm:ss")
+        : null,
+      currency: report.currency,
+      itemCount: items.length,
+      totalTaxableValue,
+      totalCgst,
+      totalSgst,
+      totalIgst,
+      totalCess,
+      totalGst,
+      grandTotal,
+      advanceNumber: advanceSummary.advanceNumber,
+      advanceAdjustedAmount: advanceSummary.allocatedAmount,
+      netPayableAmount: advanceSummary.expectedNetReimbursement,
+      advanceSummary,
     submitter: {
       name: report.user.name,
       email: report.user.email,
@@ -581,44 +590,106 @@ export async function generateExpenseSummaryPdf(data: ExpenseReportPdfData): Pro
 
   cursorY -= 22;
 
-  // Advance adjustment box if advance is linked
-  if (data.advanceAdjustedAmount > 0 || data.advanceNumber) {
+  // Linked Company Advance Summary Table
+  const advSummary = data.advanceSummary;
+  if (advSummary && advSummary.hasLinkedAdvance) {
+    checkNewPage(95);
+
+    currentPage.drawText("LINKED COMPANY ADVANCE SUMMARY", {
+      x: MARGIN_LEFT,
+      y: cursorY - 10,
+      size: 9.5,
+      font: fontBold,
+      color: rgb(0.08, 0.2, 0.4),
+    });
+    cursorY -= 16;
+
+    const advCols = [
+      { name: "Adv #", x: MARGIN_LEFT + 2, width: 56 },
+      { name: "Owner", x: MARGIN_LEFT + 59, width: 56 },
+      { name: "Requested", x: MARGIN_LEFT + 116, width: 46 },
+      { name: "Approved", x: MARGIN_LEFT + 163, width: 46 },
+      { name: "Disbursed", x: MARGIN_LEFT + 210, width: 48 },
+      { name: "Status", x: MARGIN_LEFT + 259, width: 45 },
+      {
+        name: data.workflowStatus === ReportStatus.SUBMITTED ? "Reserved" : "Adjusted",
+        x: MARGIN_LEFT + 305,
+        width: 52,
+      },
+      { name: "Returned", x: MARGIN_LEFT + 358, width: 44 },
+      { name: "Avail / Out", x: MARGIN_LEFT + 403, width: 58 },
+      {
+        name: data.workflowStatus === ReportStatus.SUBMITTED ? "Expected Net" : "Net Payable",
+        x: MARGIN_LEFT + 462,
+        width: 58,
+      },
+    ];
+
+    // Header background
     currentPage.drawRectangle({
       x: MARGIN_LEFT,
-      y: cursorY - 22,
+      y: cursorY - 16,
       width: CONTENT_WIDTH,
-      height: 22,
-      borderColor: rgb(0.7, 0.8, 0.95),
+      height: 16,
+      color: rgb(0.1, 0.2, 0.38),
+    });
+
+    for (const col of advCols) {
+      currentPage.drawText(col.name, {
+        x: col.x,
+        y: cursorY - 11,
+        size: 6.0,
+        font: fontBold,
+        color: rgb(1, 1, 1),
+      });
+    }
+
+    // Values background
+    currentPage.drawRectangle({
+      x: MARGIN_LEFT,
+      y: cursorY - 34,
+      width: CONTENT_WIDTH,
+      height: 18,
+      borderColor: rgb(0.75, 0.82, 0.9),
       borderWidth: 1,
-      color: rgb(0.95, 0.97, 1),
+      color: rgb(0.97, 0.985, 1),
     });
 
-    const advLabel = data.advanceNumber ? `Company Advance (${data.advanceNumber}):` : "Company Advance Adjusted:";
-    currentPage.drawText(`Expense: INR ${formatInr(data.grandTotal)}`, {
-      x: MARGIN_LEFT + 8,
-      y: cursorY - 14,
-      size: 8,
+    const ownerName = advSummary.advanceOwnerName || data.submitter.name;
+    const truncatedOwner = ownerName.length > 13 ? ownerName.substring(0, 11) + ".." : ownerName;
+
+    currentPage.drawText(advSummary.advanceNumber || "-", { x: advCols[0].x, y: cursorY - 29, size: 6.2, font: fontBold, color: rgb(0.08, 0.2, 0.5) });
+    currentPage.drawText(truncatedOwner, { x: advCols[1].x, y: cursorY - 29, size: 6.0, font: fontRegular, color: rgb(0.15, 0.15, 0.15) });
+    currentPage.drawText(formatInr(advSummary.requestedAmount), { x: advCols[2].x, y: cursorY - 29, size: 6.0, font: fontRegular, color: rgb(0.25, 0.25, 0.25) });
+    currentPage.drawText(formatInr(advSummary.approvedAmount), { x: advCols[3].x, y: cursorY - 29, size: 6.0, font: fontRegular, color: rgb(0.25, 0.25, 0.25) });
+    currentPage.drawText(formatInr(advSummary.disbursedAmount), { x: advCols[4].x, y: cursorY - 29, size: 6.0, font: fontBold, color: rgb(0.1, 0.25, 0.5) });
+    const statusLabel =
+      advSummary.advanceStatus === "PARTIALLY_SETTLED"
+        ? "PARTIAL"
+        : advSummary.advanceStatus || "DISBURSED";
+    currentPage.drawText(statusLabel, { x: advCols[5].x, y: cursorY - 29, size: 6.0, font: fontBold, color: rgb(0.1, 0.45, 0.2) });
+    currentPage.drawText(formatInr(advSummary.allocatedAmount), { x: advCols[6].x, y: cursorY - 29, size: 6.2, font: fontBold, color: rgb(0.75, 0.3, 0.05) });
+    currentPage.drawText(formatInr(advSummary.returnedAmount), { x: advCols[7].x, y: cursorY - 29, size: 6.0, font: fontRegular, color: rgb(0.25, 0.25, 0.25) });
+    currentPage.drawText(`${Math.round(advSummary.remainingAvailableBalance).toLocaleString("en-IN")} / ${Math.round(advSummary.outstandingBalance).toLocaleString("en-IN")}`, { x: advCols[8].x, y: cursorY - 29, size: 6.0, font: fontBold, color: rgb(0.1, 0.35, 0.65) });
+    currentPage.drawText(formatInr(advSummary.expectedNetReimbursement), { x: advCols[9].x, y: cursorY - 29, size: 6.5, font: fontBold, color: rgb(0.08, 0.5, 0.2) });
+
+    // Informational note
+    const expenseStageLabel = data.workflowStatus === ReportStatus.SUBMITTED ? "Submitted expense" : "Approved expense";
+    const summaryNote = advSummary.isPendingHistoricalAllocation
+      ? `* Advance ${advSummary.advanceNumber} linked. Formal allocation & adjustment will be validated and finalized at Approval.`
+      : advSummary.expectedNetReimbursement === 0
+      ? `* ${expenseStageLabel} of INR ${formatInr(data.grandTotal)} is fully covered by linked advance ${advSummary.advanceNumber}. No employee reimbursement payment required.`
+      : `* Advance ${advSummary.advanceNumber} covers INR ${formatInr(advSummary.allocatedAmount)}. Remaining net reimbursement payable: INR ${formatInr(advSummary.expectedNetReimbursement)}.`;
+
+    currentPage.drawText(summaryNote, {
+      x: MARGIN_LEFT + 4,
+      y: cursorY - 43,
+      size: 6.5,
       font: fontRegular,
-      color: rgb(0.2, 0.25, 0.35),
+      color: rgb(0.3, 0.4, 0.55),
     });
 
-    currentPage.drawText(`${advLabel} -INR ${formatInr(data.advanceAdjustedAmount)}`, {
-      x: MARGIN_LEFT + 150,
-      y: cursorY - 14,
-      size: 8,
-      font: fontBold,
-      color: rgb(0.7, 0.35, 0.05),
-    });
-
-    currentPage.drawText(`Net Payable: INR ${formatInr(data.netPayableAmount)}`, {
-      x: PAGE_WIDTH - MARGIN_RIGHT - 180,
-      y: cursorY - 14,
-      size: 8.5,
-      font: fontBold,
-      color: rgb(0.08, 0.5, 0.2),
-    });
-
-    cursorY -= 28;
+    cursorY -= 52;
   } else {
     cursorY -= 8;
   }
